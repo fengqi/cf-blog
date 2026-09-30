@@ -26,6 +26,20 @@ const STATUS_OPTIONS: { value: string; label: string }[] = [
 	{ value: 'hidden', label: '隐藏（不进列表）' },
 ];
 
+/** 类型切换收起分类/标签的内联脚本（必须 dangerouslySetInnerHTML，见 layout.tsx 的说明） */
+const TYPE_SCRIPT = `
+(function () {
+  var typeSelect = document.getElementById('type');
+  var termsRow = document.getElementById('terms-row');
+  if (!typeSelect || !termsRow) return;
+  function syncTerms() {
+    termsRow.style.display = typeSelect.value === 'page' ? 'none' : '';
+  }
+  typeSelect.addEventListener('change', syncTerms);
+  syncTerms();
+})();
+`;
+
 export function PostEditorPage(props: PostEditorPageProps) {
 	const post = props.post;
 	const isNew = !post;
@@ -171,19 +185,9 @@ export function PostEditorPage(props: PostEditorPageProps) {
 				</div>
 			</form>
 
-			{/* 类型切到「独立页面」时收起分类/标签（服务端对页面本来就忽略这两样） */}
-			<script>{`
-(function () {
-  var typeSelect = document.getElementById('type');
-  var termsRow = document.getElementById('terms-row');
-  if (!typeSelect || !termsRow) return;
-  function syncTerms() {
-    termsRow.style.display = typeSelect.value === 'page' ? 'none' : '';
-  }
-  typeSelect.addEventListener('change', syncTerms);
-  syncTerms();
-})();
-`}</script>
+			{/* 类型切到「独立页面」时收起分类/标签（服务端对页面本来就忽略这两样）。
+			    内联脚本必须 dangerouslySetInnerHTML——JSX 转义会让 raw text 元素里出现 &#39; */}
+			<script dangerouslySetInnerHTML={{ __html: TYPE_SCRIPT }} />
 		</AdminLayout>
 	);
 }

@@ -19,6 +19,19 @@ export interface MediaLibraryPageProps {
 	error?: string;
 }
 
+/** 复制链接的内联脚本（必须 dangerouslySetInnerHTML，见 layout.tsx 的说明） */
+const COPY_SCRIPT = `
+document.addEventListener('click', function (event) {
+  var button = event.target.closest('[data-copy]');
+  if (!button) return;
+  navigator.clipboard.writeText(button.getAttribute('data-copy')).then(function () {
+    var original = button.textContent;
+    button.textContent = '已复制';
+    setTimeout(function () { button.textContent = original; }, 1200);
+  });
+});
+`;
+
 function formatSize(bytes: number): string {
 	if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 	if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
@@ -94,17 +107,7 @@ export function MediaLibraryPage(props: MediaLibraryPageProps) {
 			</table>
 			{props.attachments.length === 0 ? <p class="hint">还没有附件。</p> : null}
 
-			<script>{`
-document.addEventListener('click', function (event) {
-  var button = event.target.closest('[data-copy]');
-  if (!button) return;
-  navigator.clipboard.writeText(button.getAttribute('data-copy')).then(function () {
-    var original = button.textContent;
-    button.textContent = '已复制';
-    setTimeout(function () { button.textContent = original; }, 1200);
-  });
-});
-`}</script>
+			<script dangerouslySetInnerHTML={{ __html: COPY_SCRIPT }} />
 		</AdminLayout>
 	);
 }

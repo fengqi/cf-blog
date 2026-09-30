@@ -11,66 +11,12 @@
 
 import { AdminLayout } from './layout';
 
-export interface RenderPageProps {
-	needsSync: number;
-	user: { screen_name: string | null; username: string };
-	message?: string;
-	error?: string;
-}
-
-export function RenderPage(props: RenderPageProps) {
-	return (
-		<AdminLayout title="渲染 · 博客后台" user={props.user} message={props.message} error={props.error}>
-			<h1>渲染</h1>
-
-			<div class="render-block">
-				<h2>全站渲染</h2>
-				<p class="hint">
-					无条件重写 R2 上全部对象（文章页、分页、归档、索引页、feed、sitemap、主题资源，约 800 个）。
-					改了模板、样式、站点设置之后用；不看「待同步」标记，跑完计数也不变。
-				</p>
-				<p class="hint" style="margin-top:0.75rem">
-					只改了某一类东西的话，可以单独渲染对应分组：
-				</p>
-				<div class="group-buttons">
-					<button type="button" data-group="assets">主题资源</button>
-					<button type="button" data-group="index">首页与分页</button>
-					<button type="button" data-group="overview">索引清单页</button>
-					<button type="button" data-group="posts">文章页</button>
-					<button type="button" data-group="pages">独立页面</button>
-					<button type="button" data-group="categories">分类归档</button>
-					<button type="button" data-group="tags">标签归档</button>
-					<button type="button" data-group="months">月份归档</button>
-					<button type="button" data-group="feed">Feed</button>
-					<button type="button" data-group="sitemap">Sitemap</button>
-				</div>
-				<span id="group-progress" class="hint" role="status" />
-				<div class="actions">
-					<button type="button" id="full-start">
-						开始全站渲染
-					</button>
-					<span id="full-progress" class="hint" role="status" />
-				</div>
-			</div>
-
-			<div class="render-block">
-				<h2>增量渲染</h2>
-				<p class="hint">
-					只处理「待同步」队列（D1 改了但还没渲进 R2 的文章），写成功一篇清一个标记。
-					和 Cron 的对账是同一套逻辑——Cron 是每小时的自动版，这是手动立即版。
-				</p>
-				<div class="actions">
-					<button type="button" id="drain-start">
-						开始增量渲染
-					</button>
-					<span class="hint">
-						当前待同步 <span id="dirty-count">{props.needsSync}</span> 篇
-					</span>
-					<span id="drain-progress" class="hint" role="status" />
-				</div>
-			</div>
-
-			<script>{`
+/**
+ * ⚠️ 内联脚本必须走 dangerouslySetInnerHTML：Hono JSX 会把字符串子节点转义，
+ * `'` 变 `&#39;`，而 <script> 是 raw text 元素、浏览器不还原实体 → 语法错误。
+ * （与 layout.tsx 的 STYLE 同一个坑。）SCRIPT 是本文件写死的常量，无用户内容。
+ */
+const SCRIPT = `
 document.addEventListener('DOMContentLoaded', function () {
   function post(path, params) {
     return fetch(path, {
@@ -187,7 +133,68 @@ document.addEventListener('DOMContentLoaded', function () {
     };
   });
 });
-`}</script>
+`;
+
+export interface RenderPageProps {
+	needsSync: number;
+	user: { screen_name: string | null; username: string };
+	message?: string;
+	error?: string;
+}
+
+export function RenderPage(props: RenderPageProps) {
+	return (
+		<AdminLayout title="渲染 · 博客后台" user={props.user} message={props.message} error={props.error}>
+			<h1>渲染</h1>
+
+			<div class="render-block">
+				<h2>全站渲染</h2>
+				<p class="hint">
+					无条件重写 R2 上全部对象（文章页、分页、归档、索引页、feed、sitemap、主题资源，约 800 个）。
+					改了模板、样式、站点设置之后用；不看「待同步」标记，跑完计数也不变。
+				</p>
+				<p class="hint" style="margin-top:0.75rem">
+					只改了某一类东西的话，可以单独渲染对应分组：
+				</p>
+				<div class="group-buttons">
+					<button type="button" data-group="assets">主题资源</button>
+					<button type="button" data-group="index">首页与分页</button>
+					<button type="button" data-group="overview">索引清单页</button>
+					<button type="button" data-group="posts">文章页</button>
+					<button type="button" data-group="pages">独立页面</button>
+					<button type="button" data-group="categories">分类归档</button>
+					<button type="button" data-group="tags">标签归档</button>
+					<button type="button" data-group="months">月份归档</button>
+					<button type="button" data-group="feed">Feed</button>
+					<button type="button" data-group="sitemap">Sitemap</button>
+				</div>
+				<span id="group-progress" class="hint" role="status" />
+				<div class="actions">
+					<button type="button" id="full-start">
+						开始全站渲染
+					</button>
+					<span id="full-progress" class="hint" role="status" />
+				</div>
+			</div>
+
+			<div class="render-block">
+				<h2>增量渲染</h2>
+				<p class="hint">
+					只处理「待同步」队列（D1 改了但还没渲进 R2 的文章），写成功一篇清一个标记。
+					和 Cron 的对账是同一套逻辑——Cron 是每小时的自动版，这是手动立即版。
+				</p>
+				<div class="actions">
+					<button type="button" id="drain-start">
+						开始增量渲染
+					</button>
+					<span class="hint">
+						当前待同步 <span id="dirty-count">{props.needsSync}</span> 篇
+					</span>
+					<span id="drain-progress" class="hint" role="status" />
+				</div>
+			</div>
+
+			<script dangerouslySetInnerHTML={{ __html: SCRIPT }} />
 		</AdminLayout>
 	);
 }

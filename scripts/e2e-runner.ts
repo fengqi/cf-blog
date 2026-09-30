@@ -604,6 +604,8 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 		'渲染页带分组独立渲染按钮（含分类/标签拆分）',
 		renderHtml.includes('data-group="categories"') && renderHtml.includes('data-group="tags"') && renderHtml.includes('data-group="feed"'),
 	);
+	// 内联脚本被 JSX 转义会让 raw text 元素里出现 &#39;（浏览器不还原实体 → JS 语法错误）
+	check('渲染页内联脚本没有被实体转义', !renderHtml.includes('&#39;') && !renderHtml.includes('&quot;'));
 
 	const feedGroup = await postForm('/admin/rebuild/full?group=feed&offset=0&limit=50', {}, sessionCookie);
 	const feedGroupReport = (await feedGroup.json()) as { total?: number; written?: number; nextOffset?: unknown };

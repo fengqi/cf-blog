@@ -93,7 +93,7 @@ npm run bench:render
 
 # 本地预览前台（R2 静态页）：起预览器 + 改了模板后重渲本地 R2
 npm run preview:r2
-curl "http://127.0.0.1:8790/__publish?confirm=local&limit=200"   # 循环到 nextOffset 为 null
+npm run rebuild:local                                            # 循环 /__publish 重渲本地 R2（自动到 nextOffset=null）
 curl "http://127.0.0.1:8790/__keys"                              # 列对象对账
 
 # 生产全量重建（写了模板/样式之后）

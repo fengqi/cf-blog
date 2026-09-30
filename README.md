@@ -87,9 +87,9 @@ curl "http://127.0.0.1:8787/cdn-cgi/local/scheduled"   # 本地手动触发 Cron
 
 ```bash
 npm run preview:r2                     # http://127.0.0.1:8790
-# 改了模板/资源之后，把当前 D1 重新渲进本地 R2（nextOffset 不为 null 就带着它再调一次）
+# 改了模板/资源之后，把当前 D1 重新渲进本地 R2（自动循环到 nextOffset 为 null）
 npm run build:assets                                                    # 改了 theme/assets/ 才需要
-curl "http://127.0.0.1:8790/__publish?confirm=local&limit=200"
+npm run rebuild:local
 curl "http://127.0.0.1:8790/__keys"                                     # 列对象，对账用
 ```
 
@@ -106,7 +106,7 @@ npx wrangler dev -c wrangler.e2e.jsonc --port 8788    # 另开一个终端
 curl -s http://127.0.0.1:8788/ | tail -3              # 看到「全部通过」即 OK
 ```
 
-断言集在 `scripts/e2e-runner.ts`（145 项）。`wrangler.e2e.jsonc` 只给本地用，**不要拿它部署**。
+断言集在 `scripts/e2e-runner.ts`（150 项）。`wrangler.e2e.jsonc` 只给本地用，**不要拿它部署**。
 （`wrangler dev` 需要写 `~/.wrangler/registry`，在受限沙箱里跑不起来。）
 
 ## 后台

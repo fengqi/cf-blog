@@ -4,6 +4,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "preview:r2": "wrangler dev -c wrangler.preview.jsonc --port 8790",
+    "rebuild:local": "tsx scripts/rebuild-local.ts",
     "typecheck": "tsc --noEmit",
     "build:assets": "tsx scripts/build-assets.ts",
     "bench:render": "tsx scripts/bench-render.ts",

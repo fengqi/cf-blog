@@ -276,7 +276,8 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('hidden 不进 feed', !earlyFeed.includes('隐藏文章标题'));
 	const hiddenHtml = (await (await env.BUCKET.get('default/hidden-one.html'))?.text()) ?? '';
 	check('hidden 页面正文正常渲染', hiddenHtml.includes('隐藏正文'));
-	// 全站一个宽度档（§11.1）：容器恒 44rem，目录浮在容器右边的留白里，不再把容器撑宽
+	// 全站一个宽度档（§11.1）：容器宽度只有一个开关 `--container-size`，
+	// 目录浮在容器右边的留白里，不再把容器撑宽
 	check('没有 h2/h3 的短文章与列表页同宽（`.layout-narrow`）', hiddenHtml.includes('<body class="layout-narrow">'));
 
 	// 注意：R2 的 list() 不返回 httpMetadata（和 S3 一致），要看缓存头必须 head/get

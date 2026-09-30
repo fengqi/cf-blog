@@ -8,6 +8,9 @@
 1. **主题资源是带指纹、`immutable` 的 R2 对象。** 改了 `theme/assets/` 下的文件：
    `npm run build:assets`（算新 hash）→ 生产全站重渲（HTML 里的 `<link>` 要跟着变）。
    少任何一步都会「改了不生效」，而且因为 `immutable` 老浏览器会一直吃旧文件。
+   ⚠️ **本地也一样**：`build:assets` 之后**等一两秒**让 `wrangler dev` 重载 bundle 再调
+   `/__publish`，否则重渲用的是旧 bundle，写出来的 HTML 引用**旧指纹** —— 而 R2 上两个指纹
+   都在，看起来一切正常，只有 `curl / | grep -o 'theme/[^"]*'` 对一下才发现。
 2. **旧指纹对象不要立刻删**（design §14.2）。边缘/浏览器可能还握着旧 HTML。
 3. **模板改了也要全站重渲**，否则前台还是旧结构。
 4. ⚠️ **这个仓库会被风息在我干活的同时提交。** 2026-09-30 他一次 `git add -A`（`2c8c09b`）
@@ -28,24 +31,32 @@
   不做下拉；清单落在 `/categories/`、`/tags/`、`/archives/`（新增 URL）。
   动机是一致性：侧栏里的计数/最新文章是**全局可变数据**，挂在文章页上会让「发一篇」理论上失效 765 个页面。
   `theme/components/sidebar.ts` 已删除。
-- **容器宽度全站一档 44rem**（`layout.ts` 的 `width` → body 类；所有页面都传 `narrow`，
-  `theme/post.ts` 也不例外）。页头 / 页脚 / 正文 / 列表共用同一个容器，任意两页的左边缘、
-  右边缘、正文宽度**完全重合**（实测 1280px 下都是 `x=288 w=704`，正文列 `x=308 w=664`）。
-  - 演进史（两轮踩坑）：① 最初 `post.ts` **恒给 `width: 'post'`**，`/about.html` 顶着 62rem
-    外壳（正文缩中间、页头宽 288px）；② 改成按 `toc.length` 给档，`/about.html` 对上了但
-    文章页仍是另一档、页头仍不齐；③ **62rem 那档整个废掉** —— 目录浮到容器右边的留白里，
-    不再靠撑宽容器腾位置。`LayoutWidth` 现在只有 `'default' | 'narrow'`。
-  - 教训：容器宽度一旦和「页面有几列」耦合，就会长出第二种宽度、永远对不齐。**宽度只跟可读性有关。**
+- **容器宽度全站一档，唯一开关是 `style.css` 的 `--container-size`（当前 50rem = 正文 760px
+  ≈ 44 汉字/行）**。页头 / 页脚 / 正文 / 列表共用同一个容器，任意两页的左边缘、右边缘、
+  正文宽度**完全重合**（实测 1280px 下都是 页头 `x=240 w=800` / 正文列 `x=260 w=760`）。
+  `layout.ts` 的 `width` → body 类，所有页面都传 `narrow`；`LayoutWidth` 只剩 `'default' | 'narrow'`。
+  - 演进史（三轮踩坑，**同一个错误的不同表现：把宽度和别的东西耦合**）：
+    ① 最初 `post.ts` 恒给 `width: 'post'`，`/about.html` 顶着 62rem 外壳（正文缩中间、
+       页头宽 288px）；② 改成按 `toc.length` 给档，`/about.html` 对上了但文章页仍是另一档；
+    ③ 废掉第二档 —— 目录改走「溢出到留白」；④ 数值从 44rem 调到 50rem，因为 44rem 是
+       照抄旧列表页宽度来的，**从来没论证过「一行几个字读起来舒服」**，风息看完说「太窄了」。
+  - 教训：**正文宽度只由「一行多少个汉字读起来舒服」决定**，与页型、有无第二列都无关。
+    引入新宽度档之前先问「这个数是怎么来的」。
 - **文章目录在服务端生成**（`theme/toc.ts`）：渲染时抽 h2/h3、生成锚点 id 并写回正文。
   HTML 里故意出现两份（`<aside class="post-toc">` + `<details class="post-toc-inline">`），
-  CSS 按 **76rem** 二选一 —— `<details>` 的展开由 `open` 属性控制，CSS 盖不住，所以不合并。
-  - ≥76rem：`.post-toc` 是 **`position: fixed`**，浮在容器右边留白里
-    （`top: 2.5rem`、`left: calc(50% + 23rem)`、宽 14rem、超高自己滚）。断点是算的：
-    `50% + 23rem + 14rem ≤ 100%` → ≥74rem，留 2rem 余量。
-  - 用 `fixed` 不用 `sticky`，因为 sticky 要求元素在文档流里 → 必须占一列 → 容器必须变宽。
-  - ⚠️ **`offsetParent` 在 `position: fixed` 元素上恒为 `null`。** `app.js` 原本用它判目录显隐，
-    目录改 fixed 后**宽屏下滚动高亮被静默关掉**（不报错、目录照常显示可点，只是永远不亮）。
-    已改用 `tocBox.getClientRects().length > 0`。**改任何「元素可见性」判断前先想起这条。**
+  CSS 按 **80rem** 二选一 —— `<details>` 的展开由 `open` 属性控制，CSS 盖不住，所以不合并。
+  - **目录不占正文宽度**：≥80rem 时 `.post-layout--with-toc` 自己宽 `calc(100% + 15.5rem)`
+    （目录 14rem + 间距 1.5rem），**溢出到容器右边的留白里**；目录是普通网格项、
+    `position: sticky; top: 2rem`。页头页脚仍是 `--container-size`，不受影响。
+  - **断点必须手算**（媒体查询读不了 CSS 变量）：`50rem/2 − 1.25rem + 15.5rem = 39.25rem ≤ 50%`
+    → 视口 ≥ 78.5rem，取 **80rem** 留 1.5rem 余量。改宽度/目录宽/间距都要重算，
+    否则会捅出横向滚动条。
+  - ⚠️ **不要用 `position: fixed` 做这个目录**。`fixed` 相对视口定位，`top: 2.5rem` 会和页头
+    齐平、压在页头 `border-bottom` 上（风息报过「目录和顶部导航平齐了，压住了分割线」）。
+    **「浮在留白里」≠「相对视口定位」** —— 用 `sticky` + 溢出一列。
+  - ⚠️ **`app.js` 判目录显隐不能用 `offsetParent`**：`position: fixed` 元素上它恒为 `null`，
+    曾导致宽屏下滚动高亮被静默关掉（不报错、目录照常显示可点，只是永远不亮）。
+    现在用 `tocBox.getClientRects().length > 0`。
 - 索引清单只列 `count > 0` 的分类/标签：274 个标签里只有 198 个有文章，
   剩下 76 个只挂在草稿上（归档页存在，但列进清单就是空页面）。
 

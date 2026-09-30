@@ -52,10 +52,11 @@
 	 * 只处理后端渲染的那份目录（`.post-toc`）：窄屏那份是 `<details>` 里的，用户点开
 	 * 才看，而窄屏下 `.post-toc` 是 `display:none`，这里就该跳过、不做无用的滚动监听。
 	 *
-	 * ⚠️ 判断「看得见吗」**不能用 `offsetParent`** —— 宽屏下 `.post-toc` 是
-	 * `position: fixed`（浮在容器右边的留白里），而 fixed 元素的 `offsetParent`
-	 * 恒为 `null`，用它判断会让滚动高亮在宽屏下静默失效。
-	 * `getClientRects()` 对 `display:none` 返回空列表、对 fixed 元素正常返回，正合适。
+	 * ⚠️ 判断「看得见吗」**不要用 `offsetParent`**。它现在恒为 null 的情况虽然没了
+	 * （`.post-toc` 是 `position: sticky`），但曾经用 `position: fixed` 定位时
+	 * `offsetParent` 恒为 `null`，宽屏下整个滚动高亮被**静默关掉** —— 不报错、目录照常
+	 * 显示可点，只是永远不亮。`getClientRects()` 对 `display:none` 返回空列表、
+	 * 对定位元素正常返回，直接判「占不占位置」，不依赖定位方式。
 	 */
 	var tocBox = document.querySelector('.post-toc');
 	if (tocBox && tocBox.getClientRects().length > 0) {

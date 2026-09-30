@@ -28,7 +28,7 @@
 theme/            前台主题（字符串模板，发布时渲染后写入 R2）
   assets/         CSS / JS 源文件 —— 由 build:assets 打指纹后写入 R2 的 theme/
   assets.ts       资源访问器（路径、<link>、<script> 标签）
-  layout.ts       页面骨架：顶栏导航 + 全站限宽（44rem）
+  layout.ts       页面骨架：顶栏导航 + 全站限宽（50rem，见 style.css 的 --container-size）
   toc.ts          文章目录：抽 h2/h3、生成锚点 id、写回正文
   overview.ts     索引页 /categories/、/tags/、/archives/
 src/
@@ -205,12 +205,13 @@ wrangler secret put TURNSTILE_SECRET
 挂在文章页上意味着「发一篇文章理论上要让 765 个页面失效」。去掉之后，
 可变数据只活在 3 个索引页对象里，文章页只依赖自己和主题（design.md §5.1 / §11.1）。
 
-- 容器宽度**全站一档 44rem**（`layout.ts` 的 `width`，所有页面都传 `narrow`）：
+- 容器宽度**全站一档**，唯一开关是 `style.css` 的 `--container-size`（当前 50rem =
+  正文 760px ≈ 44 个汉字一行；`layout.ts` 的 `width` 所有页面都传 `narrow`）：
   页头 / 页脚 / 正文 / 列表共用一个容器，任意两个页面的左边缘、右边缘、正文宽度都完全重合。
-  文章页的目录**不占正文宽度** —— 宽屏浮在容器右边的留白里，窄屏折叠进正文顶部，所以
-  「有目录」不需要更宽的容器。早先文章页那档 62rem 已废掉（`/about.html` 和短文曾顶过这个空外壳）。
-- 文章目录在**服务端**抽取（`theme/toc.ts`），宽屏浮在留白里 `fixed`、窄屏正文顶部 `<details>`，
-  两份静态 HTML 由 CSS 按 76rem 二选一，**零 JS**；滚动高亮是 `app.js` 的纯增量增强
+- 文章目录**不占正文宽度**（`theme/toc.ts` 服务端抽取）：≥80rem 时目录溢出到容器右边的留白里
+  （`.post-layout--with-toc` 自己多一列，`position: sticky`），<80rem 折叠进正文顶部 `<details>`，
+  两份静态 HTML 由 CSS 二选一，**零 JS**；滚动高亮是 `app.js` 的纯增量增强。
+  ⚠️ 断点是从容器宽度手算的，改 `--container-size` 必须重算（算法在 style.css §11）
 - 「关于」链到独立页面 `about`（`render.ts` 的 `ABOUT_SLUG`）；站点里没有这个 slug 时整条不渲染
 - 一次发布重建约 30~40 个对象；**删除一篇文章同样只重建受影响的 ~35 个**（`postDeleteTargets`），
   不是全站 800 个 —— 这条曾经是纯浪费

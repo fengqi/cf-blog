@@ -162,9 +162,11 @@ CREATE TABLE permalink_history (
 
 -- ---------------------------------------------------------------------------
 -- 8. 初始化数据
---    默认管理员密码为 'admin'，首次登录后必须立刻修改（见 design.md §8.2）。
+--    admin 的密码是**不可用的占位哈希** —— 刻意的 fail-closed，不提供默认弱口令。
+--    上线前必须 bootstrap（见 design.md §8.2）：
+--      npx tsx scripts/hash-password.ts '<口令>'
+--      wrangler d1 execute blog-db --remote --command "UPDATE users SET password='<输出>' WHERE username='admin'"
 --    哈希格式：pbkdf2$<iterations>$<salt_b64>$<hash_b64>
---    下面这串是占位值，实现时用 scripts/hash-password.ts 重新生成。
 -- ---------------------------------------------------------------------------
 INSERT INTO users (username, password, mail, screen_name, created, role)
 VALUES (

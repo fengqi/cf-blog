@@ -16,6 +16,9 @@
 | 前台 | `blog.fengqi.me` | R2 自定义域名，直出 | 不消耗 Worker 额度 |
 | 后台 | `admin-blog.fengqi.me` | Worker（全项目只有这一个） | 每天几十次 |
 
+> 前台域名**不硬编码**：唯一来源是 `options.site_url`，由 `src/models/option.ts` 的 `getSiteInfo()` 读出来交给主题。
+> 当前值是 `blog.fengqi.me`，而线上老站仍在 `fengqi.me` —— 正式切换只做三件事：改配置 → 配 R2 自定义域名 → 全站重渲。
+
 由此得出一条判断标准：**任何"每个 PV 调一次 Worker"的设计都是退步** —— 客户端埋点、动态搜索、分页 JSON 动态加载都属于这一类。设计文档 §13.3 记录了为什么这些被排除。
 
 ## 目录结构
@@ -38,6 +41,8 @@ scripts/          一次性脚本（Typecho 迁移、密码哈希）
 ```bash
 npm install
 npm run dev          # 本地跑 Worker；D1 走本地 SQLite，不消耗线上额度
+npm run typecheck    # tsc --noEmit，提交前跑一下
+npm run bench:render # 渲染压测（合成 120 篇文章，不连数据库/R2），见 design.md §13.1 #4
 npm run cf-typegen   # 改了 wrangler.jsonc 的绑定之后必须重跑，否则 c.env.xxx 没有类型
 npm run deploy       # 手动部署（不碰数据库）
 npm run deploy:ci    # 应用 D1 迁移 + 部署（Workers Builds 用的就是这个）
@@ -100,7 +105,7 @@ wrangler secret put TURNSTILE_SECRET
 ## 两条硬约束
 
 1. **SQL 只允许写在 `src/models/` 和 `src/lib/db.ts` 里。** `routes/` 和 `theme/` 不碰数据库。
-2. **R2 写入只允许发生在 `src/publish/` 里。** 别的地方碰 R2 会让缓存策略和对象一致性失控 —— 这是静态直出方案唯一的纪律要求，也最容易在维护中被破坏。
+2. **R2 写入只能由 `src/publish/` 触发。** 底层封装在 `src/lib/r2.ts`（缓存头也在那），但 `routes/`、`views/`、`models/` 不许调用写函数 —— 别的地方碰 R2 会让缓存策略和对象一致性失控，这是静态直出方案唯一的纪律要求。
 
 ## 两套渲染机制
 

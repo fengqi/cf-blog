@@ -33,7 +33,7 @@
 
 | 资源            | 免费额度           | 关键限制                                      |
 | ------------- | -------------- | ----------------------------------------- |
-| Workers       | **10 万请求/天**   | CPU **10ms/请求**、128MB 内存、**50 子请求/请求**    |
+| Workers       | **10 万请求/天**   | CPU **10ms/请求**、128MB 内存（per-isolate，各计划相同）、**50 个外部 fetch 子请求 + 1000 个到 Cloudflare 服务的子请求/请求**（R2/KV/D1 binding 共用这 1000） |
 | Static Assets | **请求免费无限**     | 2 万文件/版本、单文件 25MiB                        |
 | D1            | 5GB 总量、500MB/库 | **5M 行读/天**、**10 万行写/天**、**50 次查询/调用**    |
 | KV            | 1GB            | 10 万读/天、**1000 写/天**                      |
@@ -77,7 +77,7 @@
 
 1. **前台不进 Worker。** 文章、列表、归档、Feed、Sitemap 全部在发布时渲染成静态对象写入 R2，由 R2 直出。这是绕开请求额度上限的唯一手段，其余都是次要优化。
 2. **渲染发生在写入时，而且渲染的是完整页面。** Markdown 解析 + HTML 生成是 5–15ms 量级，放请求路径上必然撞 10ms CPU 上限（报 1102 / `exceededCpu`）。
-3. **动态接口避免 N+1，查询次数保持可控。** 免费版有 50 次查询/调用的硬限，N+1 会让列表页失控。评论与搜索移除后，动态接口只剩后台（请求量每天几十次计），这条从硬性指标降为**代码纪律** —— 新增接口时数一下查询次数，别把查询写进循环里。
+3. **动态接口避免 N+1，查询次数保持可控。** 免费版单次调用到 Cloudflare 服务（R2/KV/D1 binding）的子请求上限是 **1000**，不是 50 —— 50 只针对外部 `fetch()`（见 §1.1）。D1 自己的 limits 页至今仍写「50（Free）」，是过时数据，别拿它当硬顶。评论与搜索移除后，动态接口只剩后台（请求量每天几十次计），这条从硬性指标降为**代码纪律** —— 新增接口时数一下查询次数，别把查询写进循环里。
 4. **不做 N+1。** 一篇文章的分类、标签、作者必须在同一条 SQL 里用 `json_group_array` 聚合出来。
 5. **KV 不能当缓存用。** 1000 写/天 连每天一次的缓存刷新都撑不起。
 6. **静态资源不经 Worker 动态吐。** 主题 CSS/JS/字体/图标一律作为普通对象写入 R2、由 R2 直出（见 §2）。Static Assets 的请求虽然免费无限，但要为资源单独占一个域名，首版不划算 —— 留作 §14.2 的扩容手段。
@@ -122,6 +122,21 @@
 **为什么要拆成两个域名**：
 
 Cloudflare 的 URL Rewrite **不能改写 hostname**（只能改 path 和 query），而 R2 自定义域名必须独占一个 hostname。若想把静态前台和动态后台塞进同一个域名，就得依赖 "Worker Route 与 R2 自定义域名谁优先" 这个没有明确官方保证的行为——凭空引入风险。分子域名是零不确定性的做法，代价只有一条 DNS 记录。
+
+> ✅ **前台域名：已定 —— 读配置，不硬编码（2026-09）**
+>
+> 域名只有一处来源：`options.site_url`，由 `src/models/option.ts` 的 `getSiteInfo()` 读出来
+> 交给主题层（模板只认 `SiteInfo.url`）。**当前值 `https://blog.fengqi.me`。**
+>
+> 为什么这件事值得记一笔：线上真实站点在 `fengqi.me`（实测 200，Typecho），
+> 而 `blog.fengqi.me` 是个空的 R2 自定义域名（实测返回 R2 自己的 404）。
+> 所以只要前台还挂在 `blog.fengqi.me`，就是「新域名 + 老索引」的局面 ——
+> **`fengqi.me` 必须继续可用（老站先别关）**，否则外链和搜索结果会打到 404。
+>
+> 将来切到 `fengqi.me` 的动作只有三步：① 改 `options.site_url`
+> → ② 配 R2 自定义域名 / DNS → ③ **全站重渲**（§6.5）。
+> 正文里写死的 `fengqi.me` 与 `img-typecho-r2.fengqi.me` 绝对链接（见 §9）不受影响，
+> 前提是这两个 hostname 一直能解析到。
 
 **主域名（R2）：`blog.fengqi.me`**
 
@@ -249,19 +264,53 @@ CREATE TABLE permalink_history (
 
 | 方法       | 路径                        | R2 key        | 说明                      |
 | -------- | ------------------------- | ------------- | ----------------------- |
-| GET      | `/`                       | `index`       | 首页                      |
-| GET      | `/page/<n>/`              | `page/<n>/`   | 首页分页（当前 12 页）           |
+| GET      | `/`                       | `""`（空 key）  | 首页；**不是 `index`**，见下方实测说明 |
+| GET      | `/page/<n>/`              | `page/<n>/`   | 首页分页（当前 12 页）。`page/1/` 是 `/` 的副本，也要生成 |
 | GET      | `/<category>/<slug>.html` | 同左            | 文章；`<slug>` 未填缩略名时即 cid |
 | GET      | `/<slug>.html`            | 同左            | 独立页面，如 `/about.html`    |
 | GET      | `/category/<slug>/`       | 同左            | 分类归档                    |
-| GET      | `/tag/<slug>/`            | 同左            | 标签归档                    |
-| GET      | `/<year>/<month>/`        | 同左            | 年月归档                    |
+| GET      | `/category/<slug>/<n>/`   | 同左            | 分类归档分页（n≥1，含 `/1/` 副本）  |
+| GET      | `/tag/<slug>/`            | 同左            | 标签归档（slug 可能是中文）         |
+| GET      | `/tag/<slug>/<n>/`        | 同左            | 标签归档分页（n≥1，含 `/1/` 副本）  |
+| GET      | `/<year>/<month>/`        | 同左            | 年月归档（**没有 `/<n>/` 变体**）  |
 | GET      | `/feed/`                  | `feed/`       | RSS（带末尾斜杠）              |
 | GET      | `/sitemap.xml`            | `sitemap.xml` | 站点地图                    |
 | GET      | `/usr/uploads/*`          | 同左            | 附件（路径已确认，见 §9）          |
 | GET/POST | `/admin/*`                | —（Worker）     | 后台                      |
 
+> **归档分页是补上的一行。** 原表只有裸归档 URL，实测 `/category/default/2/` = 200、
+> `/category/ios/1/` = 200、`/tag/安卓/1/` = 200 —— 分类与标签归档**都有分页变体，
+> 而且连「第 1 页副本」都返回 200**。这些 URL 会 404 还是保住，差别就是几行代码，
+> 所以按「URL 一条都不改」的原则全部生成。
+>
+> 反过来，年月归档**没有**分页变体：`/2025/11/1/` 与 `/2025/11/2/` 实测都是 404。
+> 代码里因此对年月归档不做分页（详见下方「年月归档的例外」）。
+
 **段数不同，天然不冲突**：独立页面是单段（`/about.html`），文章是两段（`/<category>/<slug>.html`）。即使有个分类叫 `about`，`/about/760.html` 和 `/about.html` 也是两个不同的 key。
+
+**线上逐条核对的结果（2026-09 实测，对着生产站点）**
+
+URL 结构**全部对得上**：`/<cat>/<slug>.html`（含 `/php/awheel.html` 这种非数字 slug）、
+`/about.html`、`/category/go/`、`/2025/11/`、`/feed/`、`/page/1/`…`/page/12/`（正好 12 页，
+与 `posts_per_page=10`、约 120 篇可见文章一致）。`/page/1/` 确实与 `/` 同内容且返回 200 ——
+上面那套 canonical + 不进 sitemap 的处理是**必须做**的，不是可选项。
+
+但有几类 URL 在设计里没有位置，这里**显式列为本方案主动放弃**，迁移后会 404：
+
+| URL | 线上状态 | 为什么放弃 |
+|---|---|---|
+| `/author/1/`、`/author/1/2/` … `/author/1/12/` | 200，共 12 页 | 单作者站点不做作者归档（§10） |
+| `/feed/comments/` | 200，RSS XML | 评论功能整体移除；站点页脚与 `<head>` 里都有它的链接 |
+| `/<cat>/<slug>.html/comment-page-N` | 评论分页路径，出现在评论 RSS 的 `<link>` 里 | 评论功能整体移除 |
+| `/admin/login.php` | 老后台入口（页脚「登录」链接） | 后台迁到 `admin-blog` 子域名（§2） |
+
+> 之所以要把这份清单写下来：§迁移 的原则是「URL 一条都不改」，**上面这些是唯一的例外**。
+> 不写清楚，迁移后的 URL diff 会看起来像出了问题。
+>
+> 将来若想救回权重，成本最低的是用 Redirect Rules / Bulk Redirects 把 `/author/1/*` 301 到 `/`
+> —— 但注意 §5.1 开头说过：R2 对象本身发不了 301，得靠规则层。
+
+> ⚠️ **`/feed/` 现在就是坏的**（实测 HTTP 500 `Database Query Error`），迁移前先完整 dump 数据库。
 
 **`/page/1/` 与 `/` 是重复内容，必须交代清楚。** 已确认 `/page/1/` 真实存在，且渲染的就是首页内容。URL 已经存在、可能有外链与索引，**不能删**，所以：
 
@@ -270,6 +319,15 @@ CREATE TABLE permalink_history (
 - **`/page/1/` 不写进 sitemap** —— sitemap 只列 `/` 与 `/page/2/` … `/page/12/`
 
 不处理的话，同一份内容会被当成两个页面，互相稀释。
+
+> **同一套规则适用于归档的第 1 页副本**：`/category/<slug>/1/`、`/tag/<slug>/1/` 都真实存在
+> （实测 200），所以同样「生成 + canonical 指向裸 URL + 不进 sitemap」。
+> 代价是每个分类/标签多出一个对象 —— 这是为了 URL 保全付的固定成本，见 §5.3。
+
+**年月归档的例外**：`/<year>/<month>/` **没有分页变体**（`/2025/11/1/`、`/2025/11/2/` 实测都是 404），
+所以年月归档不分页，一个月份只有一个对象。
+当前没有任何月份超过 `posts_per_page`，所以这个差异还没有实际影响；
+万一将来某个月超过，页面会把该月文章全部列出（不丢内容），但**分页 URL 形态需要重新对着线上站点核对**。
 
 **文章 URL 里的分类段是个先天缺陷**，必须认清。
 
@@ -285,25 +343,62 @@ CREATE TABLE permalink_history (
 
 **末尾斜杠必须严格一致**。`/category/go/`、`/2012/12/` 这类 URL 以 `/` 结尾，而 R2 是精确 key 匹配——写入时 key 就必须带末尾斜杠，否则整片 404。
 
-为降低风险，建议写入时**同时写带斜杠和不带斜杠两个 key**（成本翻倍，但可忽略），或者配 1 条 URL Rewrite 规则做规范化。这是 §13.1 的待验证项之一。
+**已实测（2026-09，见 §13.1）：尾斜杠不归一化，就是精确匹配。**
+写入 `category/go/` 和 `category/go` 两个 key 后，`/category/go/` 与 `/category/go` 各返回各自的对象，
+互不影响；而 `/category/go/index.html` 返回 404（再次证明没有目录索引）。
+
+所以：**以带斜杠的 key 为准**（线上所有链接都带斜杠），要不要顺带写不带斜杠的版本只取决于
+你想不想让手敲 URL 的人也能打开 —— 不是必须，成本是对象数翻倍。
 
 **静态方案的一个隐形收益**：R2 是精确 key 匹配，不存在"`/:slug` 会吃掉一切单段路径"的优先级问题。  
 原来的路由分发逻辑（需要正则判定模式 B/C）直接消失 —— permalink 模式只在**发布时**决定写入哪个 key。
 
 **content-type 不需要 URL Rewrite 解决**：R2 支持写入时指定 `httpMetadata.contentType`，  
-所以 key 可以不带 `.html` 后缀，URL 保持干净：
+这样 `index`、`feed/`、`sitemap.xml` 这类**本来就不带扩展名（或扩展名不是 .html）的 key**
+也能返回正确的 Content-Type，不需要为它们各加一条 Transform Rule。
+
+> ⚠️ **但 `.html` 后缀不能省。** 它是现有 URL 的一部分（`/default/760.html`、`/about.html`），
+> 去掉就违反本节开头的硬规则。这一段的结论只关于 Content-Type，不关于 URL 形状。
 
 ```ts
+// 文章 key 带 .html —— 后缀是 URL 的一部分
 await env.BUCKET.put(`${categorySlug}/${slug}.html`, html, {
   httpMetadata: { contentType: 'text/html; charset=utf-8' },
+});
+
+// 无扩展名的 key 靠 httpMetadata 决定类型：实测 /category/go/ 返回 text/html; charset=utf-8 ✓
+await env.BUCKET.put('feed/', feedXml, {
+  httpMetadata: { contentType: 'application/rss+xml; charset=utf-8' },
 });
 ```
 
 这样一条 Transform Rule 都不需要（免费版只有 10 条，能省则省）。
 
-> 根路径 `/` 是唯一需要留意的：R2 不做目录索引，不会自动找 `index.html`。  
-> 把首页对象直接写成 key `index`，并确认 R2 对 `/` 的处理（可能需要 1 条 URL Rewrite  
-> 把 `/` 重写为 `/index`）。这是 §13 的待验证项之一。
+> ✅ **根路径 `/` 的答案（2026-09 实测）：首页对象写「空字符串 key」，不需要任何规则。**
+>
+> R2 自定义域名**不做目录索引** —— 实测即使 `index` 和 `index.html` 两个对象都存在，
+> `GET /` 仍然返回 404。但把首页写成 key `""`（空字符串）后，`GET /` 立刻返回 200，
+> 且 `httpMetadata.contentType` 生效。
+>
+> ```ts
+> // 首页：key 是空字符串，对应 URL 就是 /
+> await env.BUCKET.put('', homeHtml, {
+>   httpMetadata: { contentType: 'text/html; charset=utf-8' },
+> });
+> // 兼容入口照旧单独生成
+> await env.BUCKET.put('page/1/', sameHtmlAsHome, { httpMetadata: { ... } });
+> ```
+>
+> 这条结论的价值在于：**原方案最担心的「首页要挂 1 条 URL Rewrite（还不知对 R2 自定义域名是否生效）」
+> 这个不确定性直接消失了** —— 前台「零 Worker 请求 + 零规则依赖」成立。
+>
+> 残余风险很小但要知道：空 key 属于边缘用法，Wrangler 的 S3 通道实测可用；
+> 写发布流水线时用 `env.BUCKET.put('')` 再确认一次即可（万一被拒，退路才是 URL Rewrite）。
+
+> ⚠️ **404 页面无法自定义。** R2 没有 index document / error document 的概念
+> （S3 兼容层里 `PutBucketWebsite` 是 ❌），缺 key 时返回 R2 自带的英文 404 页
+> （实测 `cf-cache-status: DYNAMIC`，不缓存，开销可忽略）。
+> 想要自定义 404，只能走规则层（Snippets / Worker），首版接受默认页。
 
 ### 5.2 动态请求的查询预算
 
@@ -334,23 +429,33 @@ SELECT c.cid, c.title, c.slug, c.created, c.modified, c.body, c.rendered, c.exce
 
 ### 5.3 发布一次要重建哪些对象
 
-按你站点的实际规模（12 页分页、约 120 篇可见文章）估算：
+按你站点的实际规模（12 页分页、约 120 篇可见文章、7 个分类、若干标签）估算。
+下表已按 **2026-09 实测的数字**修正（`npm run bench:render`，合成 120 篇文章 / 24 个标签）：
 
 | R2 对象 | 数量 | 为什么变了 |
 |---|---|---|
 | `<category>/<slug>.html` | 1 | 文章本体 |
-| `index` | 1 | 首页 |
+| `""`（空 key，即 `/`） | 1 | 首页 |
 | `page/1/` … `page/12/` | 12 | 偏移分页，内容全部顺移（`page/1/` 需输出 canonical 指向首页，见 §5.1） |
-| `category/<slug>/` | 1 | 该文章所属分类的归档 |
-| `tag/<slug>/` | n | 每个标签的归档 |
-| `<year>/<month>/` | 1 | 当月归档 |
+| `category/<slug>/` + `category/<slug>/<n>/` | 2 ~ 4 | 该文章所属分类的归档**及其全部分页**（含 `/1/` 副本） |
+| `tag/<slug>/` + `tag/<slug>/<n>/` | 2 × n | 每个标签 2 个起（裸 URL + `/1/` 副本） |
+| `<year>/<month>/` | 1 | 当月归档（年月归档不分页） |
 | `feed/` | 1 | RSS |
 | `sitemap.xml` | 1 | URL 集合变了 |
-| **合计** | **约 20 个** | |
+| **合计** | **约 25 ~ 40 个** | 实测单篇发布 26 个（分类 3 页、5 个标签的文章） |
 
 **结论：这个规模根本不需要优化。**
 
-20 次 R2 写入，占免费版 100 万 Class A/月的 **0.002%**，墙钟不到 1 秒。
+30 次上下的 R2 写入，占免费版 100 万 Class A/月的 **0.003%**，墙钟 1 毫秒量级（实测见 §13.1 #4）。
+
+**全站重建的对象总量**（§6.5「全站重新渲染」与 §12.2 首次发布）：
+实测 **292 个对象**（120 篇文章 + 13 个首页分页 + 2 个独立页面 + 96 个归档 + 59 个年月 + feed + sitemap），
+渲染耗时 **稳态 5.0 ms**、产物 1.57 MB。你的真实站点标签更多（每个标签 2 个对象），
+量级大概在 **400 ~ 900 个对象**，仍然只占免费额度的千分之一。
+
+> **一个可调的取舍**：归档的 `/1/` 副本让「每个分类/标签」至少占 2 个对象。
+> 它们今天在线上确实返回 200，删掉就等于放弃这些 URL（违反「一条都不改」）。
+> 如果哪天对象数变成负担，这是第一个可以砍的东西 —— 但要在文档里登记成「主动放弃」。
 
 **唯一需要异步的部分**：见 §6.3。
 
@@ -433,7 +538,8 @@ markdown-it 的版本升级可能改变输出，所有文章共用一套渲染�
 必须准备一个**「全站重新渲染」**的后台入口，用来在改模板 / 样式 / 渲染器版本后刷新历史文章。
 
 按当前规模（约 120 篇文章，每篇还要顺带重建列表与归档）约几百次 R2 写入，
-**必须分批** —— 单次请求撞 50 子请求/请求 的硬限。每批 20 篇左右，配合 Cron 逐批推进。
+**必须分批** —— 但瓶颈不是子请求数（R2 binding 走的是「1000 个到 Cloudflare 服务的子请求」
+那一池，写几百个对象撞不上，见 §1.1），而是 **CPU 时间与墙钟**。每批 20 篇左右，配合 Cron 逐批推进。
 
 这是静态直出方案必备的运维手段 —— 否则改了模板样式，历史文章不会自动更新。
 
@@ -472,20 +578,49 @@ markdown-it 的版本升级可能改变输出，所有文章共用一套渲染�
 
 ### 7.2 R2 对象的缓存头
 
-主域名由 R2 直出，缓存行为完全由对象自身的 `Cache-Control` 决定 —— **必须在写入时就设好**。
+主域名由 R2 直出，缓存行为主要由对象自身的 `Cache-Control` 决定 —— **必须在写入时就设好**。
+但有个必须知道的例外：**Cloudflare 会改写小于 4 小时的 max-age**（见下面的实测）。
 
 | 对象 | Cache-Control |
 |---|---|
 | `<category>/<slug>.html`、`<slug>.html` | `public, max-age=300, stale-while-revalidate=600` |
-| `index`、`page/<n>/` | `public, max-age=60, stale-while-revalidate=300` |
+| `""`（空 key）、`page/<n>/` | `public, max-age=60, stale-while-revalidate=300` |
 | `category/<slug>/`、`tag/<slug>/`、`<year>/<month>/` | `public, max-age=120` |
 | `feed/`、`sitemap.xml` | `public, max-age=600` |
 | `theme/*`、`usr/uploads/*` | `public, max-age=31536000, immutable` |
 
 主题资源要做到 `immutable`，文件名必须带指纹（如 `style.a1b2c3.css`），否则改了样式老用户拿不到新的。
 
-> **待验证**：R2 对象被覆盖写入后，Cloudflare 边缘缓存是否自动失效（见 §13）。
-> 如果不自动失效，发布时就要主动 purge 相关 URL。
+> **已实测结案（2026-09，见 §13.1）**：R2 自定义域名的响应确实走 Cloudflare CDN 缓存
+> （实测对象返回 `cf-cache-status: HIT`，`content-type` 来自写入时的 `httpMetadata`），
+> 但**默认只缓存特定扩展名，`.html` 不在其中** —— 所以文章页「发布即生效」成立，不需要主动 purge。
+>
+> 反过来说：**不要给 HTML 开 Cache Everything。** 一旦开了，就要按 R2 官方 consistency 文档的
+> 说法处理「对象被覆盖后，旧内容会继续被服务到 TTL 到期或 purge」这个问题。
+>
+> 另外注意：浏览器侧仍按上面的 `max-age` 缓存，所以「立即生效」只对没有本地缓存的客户端成立。
+
+> ⚠️ **实测发现：小 max-age 会被 Cloudflare 抬到 4 小时，短缓存要求落不了地。**
+>
+> 官方文档（[Edge and Browser Cache TTL](https://developers.cloudflare.com/cache/how-to/edge-browser-cache-ttl/)）：
+> 默认 Browser Cache TTL 是 **4 小时**，当源站的 `Cache-Control`/`Expires` **小于**该值、
+> 或源站**完全不发**这两个头时，Cloudflare 会覆盖它们。三条实测正好对上：
+>
+> | 对象写入时的 Cache-Control | 实际返回 | `cf-cache-status` |
+> |---|---|---|
+> | `public, max-age=300`（.css） | **`public, max-age=14400`**（被抬高） | MISS → HIT |
+> | 不设 | **`max-age=14400`**（被插入） | MISS |
+> | `public, max-age=31536000, immutable`（.css） | 原样返回 ✓ | MISS → HIT |
+>
+> 两个后果：
+>
+> 1. **上表里那些小于 4h 的值，只对不走缓存的扩展名（`.html`）才有意义**；
+>    对 `/theme/*`、`/usr/uploads/*` 这类可缓存扩展名，想要长缓存（`immutable`）必须**显式写 ≥ 4h**——实测能原样保留 ✓
+> 2. 覆盖一个**已被缓存**的可缓存对象后，边缘会继续返回旧内容：实测把 `probe.css` 覆盖成 v2 后，
+>    26 秒后再抓仍然返回 v1（`cf-cache-status: HIT`）。想立即生效只能 purge，或**改文件名**（指纹）——
+>    这也是主题资源必须打指纹的第二个理由
+>
+> 另外 Free 版的 **Edge Cache TTL 最低 2 小时**（同页文档），所以别再指望把边缘缓存压到几分钟。
 
 ### 7.3 站点配置缓存（后台）
 
@@ -495,6 +630,9 @@ markdown-it 的版本升级可能改变输出，所有文章共用一套渲染�
 2. **Cache API 兜底**：配置序列化成 JSON 存 `caches.default`，TTL 300s
 
 **失效**：保存设置时清两层（`caches.default.delete()` + 用自增的 `config_version` 让内存缓存失效）。
+
+> `config_version` 是**运行时写入的一行 `options`**（`name='config_version'`），schema 不预置它 ——
+> 读不到就按 `0` 处理。别指望 `migrations/0001_init.sql` 里有这个键。
 
 > 不要用 KV 做这层——每次刷新就是一次写，1000 写/天 撑不住。
 
@@ -544,7 +682,21 @@ Workers 没有原生 bcrypt/argon2，用 WebCrypto 的 PBKDF2：
 > 不要为此引入 Durable Object。为一个登录接口加一套 DO 是明显的过度设计，而且 DO 的请求
 > 也要占额度、还要维护额外状态。这里的问题用降迭代数就能解决。
 
-**默认管理员密码是 `admin`，首次登录必须强制修改。**
+**不存在「默认口令」。** `docs/schema.sql` 末尾给 admin 写的是**不可用的占位哈希**，
+照它建库是登不进去的 —— 这是刻意的 fail-closed，避免默认弱口令躺在那里。
+
+上线前必须先 bootstrap 一次（`scripts/hash-password.ts` 见 §11 目录结构）：
+
+```bash
+# 1. 生成 PBKDF2 串
+npx tsx scripts/hash-password.ts '你的口令'
+
+# 2. 写进 D1（把上一步的输出原样替换 <hash>）
+wrangler d1 execute blog-db --remote --command \
+  "UPDATE users SET password='<hash>' WHERE username='admin'"
+```
+
+首次登录后仍**强制修改口令**，并校验长度与复杂度。
 
 ### 8.3 XSS
 
@@ -584,14 +736,21 @@ R2 里的 key 就是去掉前导斜杠的路径：`usr/uploads/2024/01/photo.jpg
 - 存量文章正文一个字都不用改
 - 存量附件的 URL 完全兼容，图片的外链权重不丢
 
-**存量规模（已核实）**：约 **10 个文件、6MB**，路径确认为 `/usr/uploads/`。
+**存量规模**：`/usr/uploads/` 目录约 **10 个文件、6MB**。但**这个数字不能直接当作「存量正文里
+实际引用的图片规模」** —— 见下面的实测观察。
 
 结论：**R2 的 10GB 存储额度完全不构成约束**，占用率不到 0.1%。附件这一块在设计上不需要任何容量优化——真正的约束只有 Class B 读操作数（§7.2）。
 
-> 一个值得注意的观察：**约 120 篇文章却只有 10 个本地附件**，说明绝大多数配图是外链图床，而不是本地上传。这有两层含义：
+> **实测观察（2026-09，核对线上正文）**：存量文章里的配图并不在第三方图床，而是在**你自己的
+> R2 域名** `img-typecho-r2.fengqi.me`（实测 200、`content-type: image/png`、
+> `cf-cache-status: HIT`）—— 也就是 `typecho-cloudflare-r2` 插件上传的那套。据此修正三点：
 >
-> 1. 内存/额度角度是好消息——要搬的东西几乎可以忽略
-> 2. 但外链图床是**脆弱依赖**：图床挂掉、防盗链策略变更、域名过期，都会让历史文章批量碎图。这是内容资产问题，不是架构问题 —— **计划后续把这些外链图片回收到 R2**，不阻塞本次迁移，可以用外部工具一次性处理
+> 1. **不再是「外链图床脆弱依赖」** —— 域名和 bucket 都在自己手里，风险降级为
+>    「那个 bucket 与域名必须继续可用」
+> 2. 正文里写死的是 `img-typecho-r2.fengqi.me`，**不是** `/usr/uploads/`。所以「10 个文件、6MB」
+>    很可能只是更早的本地附件。迁移前应当用「正文里出现过的图片域名与本地上传路径」反查真实规模，
+>    别拿 `/usr/uploads/` 的目录大小下结论
+> 3. 「计划后续把外链图片回收到 R2」这个前提不成立 —— 它们已经在 R2 上了
 
 **存量附件搬迁**：Typecho 的文件在服务器 `usr/uploads/` 目录，整目录搬到 R2：
 
@@ -602,6 +761,12 @@ rclone copy ./usr/uploads r2:blog-content/usr/uploads
 
 > ⚠️ 迁完要逐个抽查：**文件名里的中文、空格、特殊字符**容易被 URL 编码搞乱。
 > 存量附件的原始文件名很可能含中文，必须保证 R2 的 key 与浏览器实际请求的编码形式能对上。
+
+> ✅ **已实测（2026-09）**：key 直接写中文 + 空格（`usr/uploads/2024/01/测试 图片.txt`），
+> 用浏览器风格的百分号编码路径请求
+> （`/usr/uploads/2024/01/%E6%B5%8B%E8%AF%95%20%E5%9B%BE%E7%89%87.txt`）返回 **200**，
+> `content-type` 与 `cache-control: immutable` 都按写入值返回。
+> 所以编码不是拦路虎，抽查仍然要做，但不必为此设计特殊方案。
 
 **新增附件**沿用同一路径规则（`<year>/<month>` 按上传时间生成）。文件名可以对新增的做随机化处理——存量文件**不能改名**，否则 URL 就变了。
 
@@ -636,7 +801,7 @@ rclone copy ./usr/uploads r2:blog-content/usr/uploads
 | 定时发布 | ✅ | `status='waiting'` + Cron 扫描（每小时，见 §12.3） |
 | 评论（含嵌套 / 审核 / 反垃圾） | ❌ 整体移除 | 需求变更，前台不再有用户输入 |
 | 固定链接 | ✅ **完全沿用现有 Typecho URL 结构** | 迁移生死线，见 §5.1 |
-| 归档（时间 / 分类 / 标签） | ✅ | 不含作者归档，单作者站点无意义 |
+| 归档（时间 / 分类 / 标签） | ✅ | **不含作者归档** —— ⚠️ 线上 `/author/1/`、`/author/1/2/` … `/author/1/12/` 是真实存在的 12 页 URL，本方案**明确放弃**，迁移后会 404（见 §5.1 的豁免清单） |
 | 分页 | ✅ | |
 | 搜索 | ❌ 不做 | 已确认移除 |
 | 单篇阅读量 | ❌ 不做 | 前台无服务端埋点。站点整体流量用 Cloudflare Web Analytics（外部面板，不占 Worker 额度） |
@@ -665,11 +830,11 @@ cf-blog/
 │   └── 0001_init.sql              # 即 docs/schema.sql
 ├── theme/                         # ★ 主题源文件，发布时渲染并写入 R2
 │   ├── layout.ts                  # 页面骨架（唯一主题）
-│   ├── home.ts
-│   ├── post.ts
-│   ├── page.ts
-│   ├── archive.ts
+│   ├── home.ts                    # 首页与分页
+│   ├── post.ts                    # 文章 / 独立页面（共用：独立页面只是没有上一篇/下一篇）
+│   ├── archive.ts                 # 分类 / 标签 / 年月归档
 │   ├── components/                # 侧栏、分页器、标签云
+│   │   └── list.ts                # 已抽出：列表项 + 分页器（首页与归档共用）
 │   └── assets/                    # CSS / JS / 字体，构建时打指纹
 │       ├── style.css
 │       └── app.js
@@ -702,12 +867,14 @@ cf-blog/
 │   │   ├── markdown.ts            # markdown-it 配置
 │   │   ├── sanitize.ts            # HTML 白名单清洗
 │   │   ├── auth.ts                # 签名 Cookie + PBKDF2
-│   │   └── url.ts                 # permalink → R2 key 映射
+│   │   ├── time.ts                # 年月归属 / W3C 日期 / RFC822（不用 Intl）
+│   │   └── url.ts                 # permalink → R2 key 映射（URL 形状的唯一来源）
 │   └── middleware/
 │       └── auth.ts
 ├── scripts/
 │   ├── import-typecho.ts          # Typecho 迁移（含全量渲染 + 写入 R2）
-│   └── hash-password.ts           # 生成 PBKDF2 串
+│   ├── hash-password.ts           # 生成 PBKDF2 串
+│   └── bench-render.ts            # 渲染压测（§13.1 #4）：npx tsx 或 npm run bench:render
 └── docs/
     ├── design.md                  # 本文档
     └── schema.sql
@@ -723,7 +890,9 @@ cf-blog/
 **两条硬约束**：
 
 1. SQL 只允许写在 `models/` 和 `lib/db.ts` 里。`routes/` 和 `theme/` 不碰数据库。
-2. **R2 写入只允许发生在 `src/publish/` 里。** 别的地方碰 R2 会让缓存策略和对象一致性失控 —— 这是静态直出方案唯一的纪律要求，也是最容易在维护中被破坏的一条。
+2. **R2 写入只能由 `src/publish/` 触发。** 底层封装在 `src/lib/r2.ts`（缓存头也定义在那里），
+   但 `routes/`、`views/`、`models/` 一律不许调用写函数 —— 只有发布流水线能决定「写什么、什么时候写」。
+   别的地方碰 R2 会让缓存策略和对象一致性失控 —— 这是静态直出方案唯一的纪律要求，也是最容易在维护中被破坏的一条。
 
 ---
 
@@ -742,15 +911,19 @@ wrangler kv namespace create LOGIN_KV
 # 3. 建表
 wrangler d1 migrations apply blog-db --remote
 
-# 4. 密钥
+# 4. 设置管理员口令（迁移里写的是不可用占位哈希，必须先 bootstrap，见 §8.2）
+npx tsx scripts/hash-password.ts '你的口令'
+wrangler d1 execute blog-db --remote --command "UPDATE users SET password='<hash>' WHERE username='admin'"
+
+# 5. 密钥
 wrangler secret put SESSION_SECRET
 wrangler secret put IP_SALT
 wrangler secret put TURNSTILE_SECRET
 
-# 5. 本地开发（D1 走本地 SQLite，不消耗线上额度）
+# 6. 本地开发（D1 走本地 SQLite，不消耗线上额度）
 wrangler dev
 
-# 6. 部署后台 Worker
+# 7. 部署后台 Worker
 wrangler deploy
 ```
 
@@ -767,7 +940,9 @@ wrangler deploy
 > **澄清一个容易混的点**：§2 说"URL Rewrite 不能改写 hostname"，指的是 **URL Rewrite** 这个产品。
 > **Redirect Rules 是另一个产品，它可以跨 hostname 跳转**。两者的区别：**Rewrite** 改的是服务端
 > 拿到的路径，用户地址栏不变；**Redirect** 返回 301，让浏览器换地址。
-> 顺带一提，R2 对象自身返回不了 301（§5.1 讲过的限制），需要改地址的 301 只能用 Redirect Rules 做。
+> 顺带一提，R2 对象自身返回不了 301（§5.1 讲过的限制：S3 兼容层没有
+> `x-amz-website-redirect-location`，也没有 `PutBucketWebsite`）。但**要发 301 不止 Redirect Rules
+> 一种手段** —— Bulk Redirects、Workers、Snippets 都能做，按维护成本挑一个。
 
 ### 12.2 首次全量发布
 
@@ -781,11 +956,11 @@ npx tsx scripts/import-typecho.ts --full-publish
 
 按实际规模（约 120 篇文章）估算，总量在**几百个 R2 对象**量级，占免费版 100 万 Class A/月不到 0.1%，额度上毫无压力。
 
-**但不要在一次 Worker 请求里做完** —— 会撞两个硬限：50 子请求/请求、以及 CPU 时间。正确做法是用 `scripts/import-typecho.ts` **在本地分批执行**（`npx tsx` 跑在本机，完全不受 Worker 的子请求与 CPU 限制），这才是这个脚本存在的意义。
+**但不要在一次 Worker 请求里做完** —— 会撞 CPU 时间与墙钟（子请求额度不是瓶颈：R2 binding 用的是「1000 个到 Cloudflare 服务的子请求」那一池，见 §1.1）。正确做法是用 `scripts/import-typecho.ts` **在本地分批执行**（`npx tsx` 跑在本机，完全不受 Worker 的 CPU 与子请求限制），这才是这个脚本存在的意义。
 
 ### 12.3 Cron Triggers
 
-免费版账号共 5 个额度，本方案只用 **1 个**（每小时触发一次）：
+免费版账号共 5 个额度（**按账号计，不按 Worker**；per-Worker 的 cron 上限 2023 年已取消），本方案只用 **1 个**（每小时触发一次）：
 
 | 频率 | 任务 |
 |---|---|
@@ -805,16 +980,27 @@ npx tsx scripts/import-typecho.ts --full-publish
 
 实现前必须先实测这几条，否则方案有塌方风险。
 
-### 13.1 静态直出特有的验证项（新增，优先级最高）
+> **§13.1 的第 1、2、3、6 项已于 2026-09 实测完毕并结案**（对 `blog.fengqi.me` 这个真实的
+> R2 自定义域名写探针对象 + `curl` 验证，对象已删除）。结论分别落在 §5.1 / §7.2 / §9。
+> 剩下的只有第 4、5 项 —— 都不阻塞写代码。
 
-| # | 待验证 | 影响 | 验证方式 |
-|---|---|---|---|
-| 1 | R2 自定义域名对根路径 `/` 的行为 | 首页可能 404，决定要用 1 条 URL Rewrite 还是别的办法 | 上传 key `index` 后访问 `/` |
-| 2 | R2 对象被覆盖写入后，边缘缓存是否自动失效 | 决定"发布即生效"能否成立，以及要不要主动 purge | 覆盖一个对象，观察响应变化 |
-| 3 | R2 自定义域名的响应是否经 Cloudflare CDN 缓存 | 直接决定 Class B 消耗是 300 万还是更少 | 看响应头 `cf-cache-status` |
-| 4 | 发布流水线（渲染完整页面 + 写 10–30 个 R2 对象）的实际 CPU 与墙钟耗时 | 决定同步/异步切分点，以及是否必须上 Queues | 用最长文章压测 |
-| 5 | R2 自定义域名与 Worker Custom Domain 的隔离是否彻底 | 万一互相干扰，整套架构要重来 | 两个域名配好后交叉验证 |
-| 6 | **带末尾斜杠的 URL 在 R2 上的 key 匹配** | `/category/go/`、`/2012/12/` 若被规范化成无斜杠，整片归档页 404 | 上传 key `category/go/`，访问该 URL 验证 |
+### 13.1 静态直出特有的验证项
+
+| # | 状态 | 结论 |
+|---|---|---|
+| 1 | ✅ 已结案 | **R2 自定义域名不做目录索引**：`index` 与 `index.html` 两个对象都存在时，`GET /` 仍是 404。**但把首页写成空 key `""` 后，`GET /` 返回 200 且 contentType 生效** → §5.1 已改为「首页 = 空 key」，**不需要任何 URL Rewrite**。唯一残余项：写发布流水线时用 `env.BUCKET.put('')` 复核一次（Wrangler 的 S3 通道已实测可用） |
+| 2 | ✅ 已结案 | `.html` 默认**不进** CDN 缓存（两次请求都是 `cf-cache-status: DYNAMIC`）→ 文章页覆盖即生效；而可缓存扩展名（`.css`/`.js`/图片）覆盖后**旧内容继续被服务**（实测覆盖成 v2 后仍返回 v1）。细节与对策见 §7.2 |
+| 3 | ✅ 已结案 | **会缓存**：可缓存扩展名 MISS → HIT（`age` 递增）；`content-type` 来自写入时的 `httpMetadata` |
+| 4 | 🟡 部分完成 | **渲染部分已实测**（`npm run bench:render`，合成 120 篇 / 24 标签）：全站 292 个对象稳态 **5.0 ms**、产物 1.57 MB；单篇发布 26 个对象 **0.8 ms**；物化只占 8%。→ §6.3 的「20 个对象、墙钟不到 1 秒、不需要 Queues」成立，且余量很大。<br>**还没测的**：真实 Workers（Free 版 isolate）的 CPU time、以及 30 次 R2 写入的墙钟 —— 等 `publish/pipeline.ts` 落地后在 `wrangler dev` / 线上 observability 里复核 |
+| 5 | ⏳ 待做 | R2 自定义域名与 Worker Custom Domain 的隔离 —— 等 `admin-blog.fengqi.me` 配好之后交叉验证 |
+| 6 | ✅ 已结案 | **尾斜杠是精确 key 匹配，不归一化**：`category/go/` 与 `category/go` 两个 key 各自独立命中，`/category/go/index.html` 404 → §5.1 的 key 表（`page/<n>/`、`category/<slug>/`、`<year>/<month>/`）成立 |
+
+**实测顺带发现的第 7 项（不在原计划里）**：
+
+| # | 状态 | 结论 |
+|---|---|---|
+| 6b | ✅ 已结案 | **Cloudflare 会把小于 4 小时的 `max-age` 抬到 14400**（默认 Browser Cache TTL），缺省时还会插入；≥4h 的值原样保留。这直接影响 §7.2 的缓存表，详见那里 |
+| 6c | ⚠️ 需接受 | **404 页面无法自定义**：R2 没有 index/error document，缺 key 时返回 R2 自带的英文 404 页（DYNAMIC，不缓存）。首版接受 |
 
 ### 13.2 沿用项
 
@@ -883,19 +1069,28 @@ npx tsx scripts/import-typecho.ts --full-publish
 
 ### 迁移前的必做功课：URL 清单核对
 
-```bash
-# 抓现有站点的 sitemap，导出全部被索引的 URL
-curl -s https://你的域名/sitemap.xml | grep -o '<loc>[^<]*</loc>' > urls-old.txt
-```
+> ⚠️ **原方案指定的「抓 sitemap」在线上跑不通（2026-09 实测）**：生产站点的
+> `/sitemap.xml` 返回的是 Typecho 的 404 页（没装 sitemap 插件），`/feed/` 更是
+> **HTTP 500 `Database Query Error`**。所以清单必须**从数据库生成**，不能从线上抓。
 
-迁移完成后对新站点跑同样的命令，**两个清单逐条 diff，差集必须为空**。
+正确顺序：
+
+1. **从 MySQL 生成权威清单**（URL 是 permalink 规则的函数，数据库才是权威源）：
+   - 文章：`typecho_contents` 中 `type='post' AND status='publish'` → `/<category-slug>/<slug>.html`
+   - 独立页面：`type='page' AND status='publish'` → `/<slug>.html`
+   - 分类 / 标签：`typecho_metas` → `/category/<slug>/`、`/tag/<slug>/`
+   - 年月归档：可见文章的 `created` 去重 → `/<year>/<month>/`
+   - 分页：按 `posts_per_page` 算出的 `/page/1/` … `/page/N/`
+2. **再爬线上站点交叉验证**：把第 1 步的清单逐条抓一遍状态码，全 200 才算对得上
+   （`/feed/` 现在 500，属于老站本身的问题，先记下来）
+3. 迁移完成后对新站点跑同一份清单，**逐条 diff，差集必须为空** —— 唯一的例外是
+   §5.1 里显式放弃的那几类（作者归档、评论相关路径、老后台入口）
+
 这是唯一能系统性发现 URL 遗漏的办法，靠人眼核对不可能做到。
 
-> ⚠️ **先确认 sitemap 是不是分页的。** Typecho 的 sitemap 插件通常会生成一个**索引**文件 ——
-> `sitemap.xml` 里只有指向 `sitemap-post-1.xml`、`sitemap-page-1.xml` 之类的 `<loc>`，
-> 真正的文章 URL 在子文件里。这种结构下上面的命令抓到的是子 sitemap 的地址，**必须递归抓一层**。
->
-> 判断方法很直接：看 `urls-old.txt` 的行数，和实际内容量（约 120 篇 + 分类标签归档 + 分页）对不对得上。差太远就是分页了。
+> **sitemap 分页的坑已不适用**（本站在线根本没有 sitemap）。这段留给将来真装了 sitemap 插件的
+> 情况：Typecho 的 sitemap 插件会生成一个**索引**文件，`sitemap.xml` 里只有指向
+> `sitemap-post-1.xml` 之类的 `<loc>`，真正的文章 URL 在子文件里，要递归抓一层。
 
 ### 数据迁移步骤
 
@@ -916,9 +1111,18 @@ curl -s https://你的域名/sitemap.xml | grep -o '<loc>[^<]*</loc>' > urls-old
 
 每条 INSERT 都算 rows written（免费版 10 万/天）。`contents` 表 760 行（含草稿与约 10 条附件记录），加上 `metas` / `relationships` / `options`，总量在千行级，一次导完完全没问题。**不需要分批，也不需要临时升级到 Paid。**
 
-**② 域名变更会打断正文里的绝对 URL —— 本项目不适用**
+**② 域名变更会打断正文里的绝对 URL —— 现在要正视，因为前台暂时不在老域名上**
 
-已确认**继续沿用原域名**，正文里写死的 `https://你的域名/usr/uploads/...` 依然有效，无需改写。
+前台域名已定为**读配置**（`options.site_url`，当前值 `https://blog.fengqi.me`，见 §2），
+但线上索引与正文里的绝对链接指向的是 `fengqi.me`。**在正式切到 `fengqi.me` 之前，
+两个域名会同时存在**，所以要接受两件事：
+
+1. 老站（`fengqi.me` 上的 Typecho）**不能关** —— 它是索引与外链的实际落点
+2. `blog.fengqi.me` 上的 canonical 指向 `blog.fengqi.me`，与老站索引是两套；
+   正式切换时按 §2 的三步走（改配置 → 配域名 → 全站重渲）
+
+另外，实测正文里写死的图片地址是 `https://img-typecho-r2.fengqi.me/...`（自己的 R2 域名，见 §9），
+**不是** `https://你的域名/usr/uploads/...`。任何域名变更都要连带评估这个域名。
 
 代价是这是一次**硬切换**：域名只有一个，新旧站点不能并行跑。所以迁移前必须先备好回滚路径——老站的数据库和文件先完整保留，DNS 能快速切回。别等到出问题才想回滚。
 

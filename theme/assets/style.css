@@ -363,6 +363,15 @@ hr {
 	line-height: 1.8;
 }
 
+/* 摘要现在是渲染后的 HTML（可能内含 <p> 等块级元素），吃掉首尾的浏览器默认边距 */
+.post-excerpt > :first-child {
+	margin-top: 0;
+}
+
+.post-excerpt > :last-child {
+	margin-bottom: 0;
+}
+
 .post-empty {
 	color: var(--text-muted);
 	text-align: center;

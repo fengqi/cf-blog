@@ -20,6 +20,7 @@ import { renderOverview } from '../../theme/overview';
 import type { OverviewItem, OverviewLayout } from '../../theme/overview';
 import { renderPost } from '../../theme/post';
 import type { TermLink } from '../../theme/post';
+import { makeExcerpt, renderMarkdown } from '../lib/markdown';
 import { HTML_CONTENT_TYPE } from '../lib/r2';
 import type { RenderedObject } from '../lib/r2';
 import { formatDateOnly, formatRfc822, monthOf } from '../lib/time';
@@ -74,7 +75,8 @@ function toListPost(post: PostRecord): ListPost {
 		title: post.title,
 		url: articlePath(post),
 		created: post.created,
-		excerpt: post.excerpt,
+		// 摘要存的是 Markdown 原文，这里转成（已清洗的）HTML 给主题原样输出
+		excerptHtml: post.excerpt ? renderMarkdown(post.excerpt) : '',
 		categories: toTermLinks(post.categories),
 	};
 }
@@ -374,7 +376,7 @@ function renderFeed(snapshot: SiteSnapshot): string {
 		<link>${xmlEscape(link)}</link>
 		<guid isPermaLink="true">${xmlEscape(link)}</guid>
 		<pubDate>${formatRfc822(post.created)}</pubDate>
-		<description>${xmlEscape(post.excerpt)}</description>
+		<description>${xmlEscape(makeExcerpt(renderMarkdown(post.excerpt)))}</description>
 		<content:encoded>${cdata(post.html)}</content:encoded>
 	</item>`;
 		})

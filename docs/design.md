@@ -534,7 +534,8 @@ SELECT c.cid, c.title, c.slug, c.created, c.modified, c.body, c.rendered, c.exce
 Worker
    ├─ 1. Markdown → HTML（markdown-it）
    ├─ 2. XSS 清洗（白名单）
-   ├─ 3. 生成摘要、统计字数
+   ├─ 3. 生成摘要、统计字数（excerpt 存 Markdown 原文：作者自定义 > `<!--more-->` 前半段
+   │     > 自动截前 200 字；列表页渲染时再转 HTML，Feed 剥回纯文本）
    ├─ 4. 写入 D1：contents（body 原文 + rendered 片段 + excerpt + words）
    ├─ 5. 用模板把 rendered 套进完整页面骨架
    ├─ 6. 批量写入 R2（对象清单见 §5.3）

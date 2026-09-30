@@ -91,11 +91,11 @@ export async function renderAndSaveBody(
 	const { body, beforeMore } = splitMoreMarker(source.body);
 	const rendered = renderMarkdown(body);
 	const text = extractText(rendered);
-	// 摘要优先级：作者自定义 > `<!--more-->` 前半段 > 自动截前 200 字。
-	// 作者填了自定义摘要就尊重它；否则把自动摘要**落库** —— 这样列表查询不必回捞 rendered
+	// 摘要**存 Markdown 原文**，列表页渲染时再转 HTML（render.ts）。
+	// 优先级：作者自定义摘要 > `<!--more-->` 前半段 > 自动截前 200 字（纯文本）。
 	const excerpt =
 		(source.excerpt ?? '').trim() ||
-		(beforeMore !== null ? makeExcerpt(renderMarkdown(beforeMore)) : '') ||
+		beforeMore ||
 		makeExcerpt(rendered);
 	const words = countWords(text);
 

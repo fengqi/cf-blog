@@ -36,7 +36,10 @@ export interface PostRecord {
 	modified: number;
 	/** 已清洗的正文 HTML（§8.3） */
 	html: string;
-	/** **纯文本**摘要（调用方从 excerpt 或 rendered 剥标签截断而来） */
+	/**
+	 * 摘要 **Markdown 原文**（列表页渲染时经 renderMarkdown 转成 HTML）。
+	 * 来源优先级：作者自定义摘要 > `<!--more-->` 前半段 > 自动截前 200 字。
+	 */
 	excerpt: string;
 	words?: number;
 	author?: { name: string; url?: string };

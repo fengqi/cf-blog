@@ -483,6 +483,7 @@ export async function recordPermalink(db: Db, cid: number, key: string): Promise
 
 export interface RenderedFields {
 	rendered: string;
+	/** 摘要（Markdown 原文），列表页渲染时再转 HTML */
 	excerpt: string;
 	words: number;
 }

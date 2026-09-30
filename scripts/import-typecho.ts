@@ -421,12 +421,13 @@ function buildContentRow(
 	const source = isMarkdown ? body.replace(MARKDOWN_MARKER, '') : body;
 	const renderSource = (text: string) => (isMarkdown ? renderMarkdown(text) : sanitizeHtml(text));
 
-	// `<!--more-->` 是摘要分界：前半段当自定义摘要，正文里的标记去掉
+	// `<!--more-->` 是摘要分界：前半段当自定义摘要（保留 Markdown/HTML 原文，首页渲染时再转），
+	// 正文里的标记去掉
 	const moreIndex = source.search(MORE_MARKER);
-	const excerptSource = moreIndex >= 0 ? source.slice(0, moreIndex) : '';
+	const excerptSource = moreIndex >= 0 ? source.slice(0, moreIndex).trim() : '';
 	const cleanBody = source.replace(MORE_MARKER, '');
 	const rendered = renderSource(cleanBody);
-	const excerpt = excerptSource.trim().length > 0 ? makeExcerpt(renderSource(excerptSource), 220) : makeExcerpt(rendered);
+	const excerpt = excerptSource || makeExcerpt(rendered);
 
 	// 附件：Typecho 把元信息塞在 text 里的 JSON
 	let mime: string | null = null;

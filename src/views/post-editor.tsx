@@ -122,8 +122,8 @@ export function PostEditorPage(props: PostEditorPageProps) {
 						{post?.excerpt ?? ''}
 					</textarea>
 					<p class="hint">
-						留空则自动从正文生成（纯文本，落库）；也可以在正文里写{' '}
-						<code>&lt;!--more--&gt;</code>，标记前的部分会作为摘要（Typecho 惯例）
+						支持 Markdown，首页按渲染后的样式展示；留空则取正文里{' '}
+						<code>&lt;!--more--&gt;</code> 前的部分（Typecho 惯例），也没有就自动截前 200 字
 					</p>
 				</div>
 

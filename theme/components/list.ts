@@ -18,8 +18,8 @@ export interface ListPost {
 	url: string;
 	/** Unix 秒 */
 	created: number;
-	/** **纯文本**摘要（调用方负责剥标签），转义由本模块负责 */
-	excerpt?: string;
+	/** **已渲染的摘要 HTML**（发布流水线已按 Markdown 渲染并白名单清洗），原样输出 */
+	excerptHtml?: string;
 	categories?: TermLink[];
 }
 
@@ -38,7 +38,7 @@ export function renderPostItem(post: ListPost, site: SiteInfo): string {
 			<h2 class="post-item-title"><a href="${escapeHtml(post.url)}">${escapeHtml(post.title)}</a></h2>
 			<p class="post-meta">
 				${meta.join('\n\t\t\t\t')}
-			</p>${post.excerpt ? `\n\t\t\t<p class="post-excerpt">${escapeHtml(post.excerpt)}</p>` : ''}
+			</p>${post.excerptHtml ? `\n\t\t\t<div class="post-excerpt">${post.excerptHtml}</div>` : ''}
 		</li>`;
 }
 

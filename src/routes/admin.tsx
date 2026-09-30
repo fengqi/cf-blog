@@ -148,9 +148,20 @@ adminRoutes.post('/admin/posts', async (c) => {
 	}
 
 	try {
+		// 文章必须有归属：没勾分类就回落到第一个分类（schema 里种子的「默认分类」）。
+		// 否则 permalink 是 /<category>/<slug>.html，缺分类根本拼不出 URL（§4.3）
+		const categoryIds = payload.categoryIds.length > 0 ? payload.categoryIds : [];
+		if (payload.input.type === 'post' && categoryIds.length === 0) {
+			const fallback = await listTerms(db, 'category');
+			if (fallback.length === 0) {
+				return c.redirect('/admin/posts/new?error=' + encodeURIComponent('没有任何分类，无法确定文章 URL'), 303);
+			}
+			categoryIds.push(fallback[0].mid);
+		}
+
 		const cid = await createContent(db, payload.input, c.var.user.uid);
 		const tagIds = await ensureTags(db, payload.tagNames);
-		await setContentTerms(db, cid, payload.categoryIds, tagIds, [], []);
+		await setContentTerms(db, cid, categoryIds, tagIds, [], []);
 		const report = await publishPost(c.env, getExecutionContext(c), cid);
 		return c.redirect(
 			`/admin/posts/${cid}/edit?message=` + encodeURIComponent(messageForReport('创建', report)),
@@ -180,11 +191,17 @@ adminRoutes.post('/admin/posts/:cid', async (c) => {
 	try {
 		await updateContentFields(db, cid, payload.input);
 		const existingView = await getEditorView(db, cid);
+		// 同新建：文章不能没有分类，空着就沿用原有的，仍为空则回落到第一个分类
+		let categoryIds = payload.categoryIds.length > 0 ? payload.categoryIds : (existingView?.categoryIds ?? []);
+		if (payload.input.type === 'post' && categoryIds.length === 0) {
+			const fallback = await listTerms(db, 'category');
+			if (fallback.length > 0) categoryIds = [fallback[0].mid];
+		}
 		const tagIds = await ensureTags(db, payload.tagNames);
 		await setContentTerms(
 			db,
 			cid,
-			payload.categoryIds,
+			categoryIds,
 			tagIds,
 			existingView?.categoryIds ?? [],
 			[], // 标签用名字重建，旧的 mid 不必参与计数刷新（ensureTags 已覆盖）

@@ -116,7 +116,11 @@ export function PostEditorPage(props: PostEditorPageProps) {
 									type="checkbox"
 									name="categories"
 									value={String(term.mid)}
-									checked={post?.categoryIds.includes(term.mid) ?? false}
+									checked={
+										post
+											? post.categoryIds.includes(term.mid)
+											: term.mid === props.categories[0]?.mid // 新建时默认选中第一个分类
+									}
 								/>{' '}
 								{term.name}
 							</label>

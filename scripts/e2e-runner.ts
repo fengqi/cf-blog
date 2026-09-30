@@ -427,6 +427,16 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('登录后能预览草稿', previewOk.status === 200 && previewHtml.includes('草稿标题'));
 	check('预览带 noindex', (previewOk.headers.get('x-robots-tag') ?? '').includes('noindex'));
 
+	// 不勾分类新建：必须回落到默认分类，而不是拼不出 URL 报错
+	const noCategoryForm = await postForm(
+		'/admin/posts',
+		{ title: '没勾分类的文章', slug: 'no-category', type: 'post', status: 'publish', body: '正文', excerpt: '', tags: '', allow_feed: '1' },
+		sessionCookie,
+	);
+	await Promise.allSettled(waits.splice(0));
+	const noCategoryKeys = (await env.BUCKET.list()).objects.map((object) => object.key);
+	check('没勾分类的文章也能发布（回落到默认分类）', noCategoryForm.status === 303 && noCategoryKeys.includes('default/no-category.html'), `${noCategoryForm.status}`);
+
 	// 表单删除
 	const deleteForm = await postForm('/admin/posts/101/delete', {}, sessionCookie);
 	await Promise.allSettled(waits.splice(0));

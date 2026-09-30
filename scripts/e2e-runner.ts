@@ -335,10 +335,31 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 			categoriesHtml.includes('href="/category/default/"') &&
 			categoriesHtml.includes('class="term-count"'),
 	);
+	// 分类只有 7 条、每条带一句描述 → 一行一条；标签 198 条 → 流式排列（一行多个）
+	check(
+		'分类页保持一行一条（带描述），不加 `--flow`',
+		categoriesHtml.includes('class="term-list"') &&
+			categoriesHtml.includes('class="term-description"') &&
+			!categoriesHtml.includes('term-list--flow'),
+	);
 	const tagsHtml = (await (await env.BUCKET.get('tags/'))?.text()) ?? '';
 	check('标签索引页链接已编码（中文标签）', tagsHtml.includes('href="/tag/%E5%AE%89%E5%8D%93/"'));
+	check('标签索引页是流式排列（一行多个）', tagsHtml.includes('class="term-list term-list--flow"'));
 	const archivesHtml = (await (await env.BUCKET.get('archives/'))?.text()) ?? '';
-	check('归档索引页列出月份', archivesHtml.includes('<h1 class="archive-title">归档</h1>') && archivesHtml.includes('class="term-list"'));
+	check(
+		'归档索引页按年份分组、月份流式排列',
+		archivesHtml.includes('<h1 class="archive-title">归档</h1>') &&
+			archivesHtml.includes('class="term-list term-list--flow"') &&
+			archivesHtml.includes('<section class="term-group">') &&
+			archivesHtml.includes('<h2 class="term-group-title">'),
+	);
+	// 三个索引页都不再输出「共 N 个…」的说明行（见 theme/overview.ts）
+	check(
+		'索引页不再输出「共 N 个…」说明行',
+		!categoriesHtml.includes('archive-description') &&
+			!tagsHtml.includes('archive-description') &&
+			!archivesHtml.includes('archive-description'),
+	);
 
 	const afterFull = await all<{ count: number }>("SELECT COUNT(*) AS count FROM contents WHERE needs_sync = 1 AND status = 'publish'");
 	check('publishAll 后 needs_sync 清零', afterFull[0].count === 0, `剩余 ${afterFull[0].count}`);

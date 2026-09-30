@@ -17,7 +17,7 @@ import { renderHome } from '../../theme/home';
 import type { ListPost } from '../../theme/components/list';
 import type { NavLink } from '../../theme/layout';
 import { renderOverview } from '../../theme/overview';
-import type { OverviewItem } from '../../theme/overview';
+import type { OverviewItem, OverviewLayout } from '../../theme/overview';
 import { renderPost } from '../../theme/post';
 import type { TermLink } from '../../theme/post';
 import { HTML_CONTENT_TYPE } from '../lib/r2';
@@ -290,45 +290,48 @@ function renderOverviewPage(
 
 	let title: string;
 	let items: OverviewItem[];
+	/**
+	 * 排布方式：分类只有 7 条、每条还带一句描述，一行一条最好读；
+	 * 标签 198 条、归档 58 个月份，一行一条会拖成一屏半的竖直列表，改成流式排列。
+	 */
+	let layout: OverviewLayout;
 	switch (section) {
 		case 'categories':
 			title = '分类';
 			items = termItems(snapshot.categories, categoryPath);
+			layout = 'list';
 			break;
 		case 'tags':
 			title = '标签';
 			items = termItems(snapshot.tags, tagPath);
+			layout = 'flow';
 			break;
 		case 'archives':
 			title = '归档';
-			// `snapshot.months` 已经是倒序（最近的月份在前），这里不再排一次
+			// `snapshot.months` 已经是倒序（最近的月份在前），这里不再排一次 ——
+			// 同一年天然相邻，`group` 正是靠这个切连续段的（见 theme/overview.ts）
 			items = snapshot.months.map((month) => ({
-				name: `${month.year} 年 ${month.month} 月`,
+				name: `${month.month} 月`,
 				url: monthPath(month.year, month.month),
 				count: month.count,
+				group: `${month.year} 年`,
 			}));
+			layout = 'flow';
 			break;
 	}
 
-	const unit = section === 'tags' ? '个标签' : '个分类';
 	/**
-	 * 措辞要和实际渲染的内容一致：`termItems` 会滤掉计数为 0 的术语
-	 * （本库有 76 个只挂在草稿上的标签），所以不能说「共 198 个标签」。
+	 * 刻意**不传页面说明**（原先这里是「共 7 个分类（只列有文章的），按文章数排列」这类）：
+	 * 数量对读者没用，扫一眼清单本身就够了；而且措辞很容易和实际渲染不一致
+	 * （`termItems` 会滤掉计数为 0 的术语 —— 本库有 76 个只挂在草稿上的标签）。
+	 * 少一句话就少一个「说明和内容对不上」的机会。
 	 */
-	const description =
-		items.length === 0
-			? undefined
-			: section === 'archives'
-				? `共 ${items.length} 个月份，最近的排在最前`
-				: `共 ${items.length} ${unit}（只列有文章的），按文章数排列`;
-
 	const html = renderOverview({
 		site: snapshot.site,
 		title,
-		description,
 		items,
-		emptyText:
-			section === 'archives' ? '还没有文章，所以没有归档。' : `还没有任何${title}。`,
+		layout,
+		emptyText: section === 'archives' ? '还没有文章，所以没有归档。' : `还没有任何${title}。`,
 		canonicalPath: overviewPath(section),
 		nav,
 	});

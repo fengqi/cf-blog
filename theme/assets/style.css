@@ -714,12 +714,19 @@ hr {
 }
 
 /* ==========================================================================
-   9. 术语清单（/categories/、/tags/、/archives/）
+   9. 术语清单（/categories/ 一行一条；/tags/ 与 /archives/ 一行多个）
    ========================================================================== */
 
 /*
  * 这三个页面承接了原来侧栏的「浏览入口」，但形态是**整页清单** ——
  * 不再有 17rem 宽的栏去硬塞 198 个标签和 58 个月份，也就不需要限高滚动条。
+ *
+ * 两种排布（`theme/overview.ts` 的 `layout`）用的是**同一份 `.term-item` 结构**，
+ * 差别只在 `<ul>` 上的 `--flow` 修饰类：
+ *   - 默认（一行一条）：撑满一行的块 + 下划线分隔。`/categories/` 7 条、每条带一句描述，
+ *     摊成胶囊反而读不清，所以保持块式。
+ *   - `.term-list--flow`（一行多个）：收成「贴着内容的胶囊」，宽度随内容走、不设固定宽度。
+ *     `/tags/` 198 个、`/archives/` 58 个月份，一行一条会拖成一屏半的竖直列表。
  */
 
 .term-list {
@@ -768,6 +775,73 @@ hr {
 	line-height: 1.7;
 }
 
+/* --- 流式排布：/tags/ 与 /archives/ --- */
+
+.term-list--flow {
+	display: flex;
+	flex-wrap: wrap;
+	/* 行间距比列间距小一点：视觉上更像「成片的标签」而不是散落的方块 */
+	gap: 0.6rem 0.75rem;
+}
+
+/* 块式那套（下划线 + 上下留白）在流式里全都不需要 */
+.term-list--flow .term-item {
+	padding: 0;
+	border-bottom: 0;
+}
+
+/*
+ * 从「撑满一行的块」收成「贴着内容的胶囊」：`inline-flex` 让宽度由内容决定
+ * （**不设固定宽度**），`justify-content: space-between` 换成 `flex-start`，
+ * 否则名称和计数之间会被拉开。
+ */
+.term-list--flow .term-head {
+	display: inline-flex;
+	justify-content: flex-start;
+	gap: 0.4rem;
+	padding: 0.28rem 0.7rem;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--bg-soft);
+	transition: border-color 0.15s ease;
+}
+
+.term-list--flow .term-head:hover {
+	border-color: var(--accent);
+}
+
+/* 胶囊整体响应 hover，不只是文字上 */
+.term-list--flow .term-head:hover a {
+	color: var(--accent);
+}
+
+.term-list--flow .term-head a {
+	font-size: 0.9375rem;
+}
+
+.term-list--flow .term-count {
+	font-size: 0.8125rem;
+}
+
+/* --- 归档的分组：按年份，年份之间隔开 --- */
+
+/*
+ * `+` 选择器让分隔线只出现在「年份之间」，第一组头上不加线 —— 不然它会和
+ * 上面那行说明文字挤在一起，看着像把说明也划进第一组。
+ */
+.term-group + .term-group {
+	margin-top: 2.25rem;
+	padding-top: 1.75rem;
+	border-top: 1px solid var(--border);
+}
+
+.term-group-title {
+	margin: 0 0 0.9rem;
+	font-size: 1rem;
+	font-weight: 650;
+	color: var(--text-soft);
+}
+
 /* ==========================================================================
    10. 归档页
    ========================================================================== */
@@ -785,8 +859,14 @@ hr {
 	font-size: 0.9375rem;
 }
 
+/*
+ * 标题和下面那份清单之间的间距。**必须把 `.term-group` 也列上** —— 归档页的标题下面
+ * 直接是分组用的 `<section>`，不再是一份光秃秃的 `.term-list`。索引页现在没有那句
+ * 「共 N 个…」（见 theme/overview.ts），这里就成了标题与内容之间唯一的间距来源。
+ */
 .archive-title + .post-list,
-.archive-title + .term-list {
+.archive-title + .term-list,
+.archive-title + .term-group {
 	margin-top: 1.75rem;
 }
 

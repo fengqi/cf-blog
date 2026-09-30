@@ -45,6 +45,12 @@
 - **文章目录在服务端生成**（`theme/toc.ts`）：渲染时抽 h2/h3、生成锚点 id 并写回正文。
   HTML 里故意出现两份（`<aside class="post-toc">` + `<details class="post-toc-inline">`），
   CSS 按 **80rem** 二选一 —— `<details>` 的展开由 `open` 属性控制，CSS 盖不住，所以不合并。
+- **顶栏的三个索引页形态不同**：
+  - `/categories/`：只有 7 条、每条带一句描述 → 保持一行一条（`layout: 'list'`）；
+  - `/tags/`：198 个标签 → `layout: 'flow'`，流式胶囊，一行多个，宽度随内容；
+  - `/archives/`：按年份分组，同一年月份 `flow`；年份之间用 `border-top` + `margin` 隔开。
+  - 都不输出「共 N 个…」的说明行 —— 数量对读者没用，且容易和实际渲染（过滤掉只挂草稿
+    的术语后）对不上。这个说明行原先在 `src/publish/render.ts` 里计算，后来整段删了。
   - **目录不占正文宽度**：≥80rem 时 `.post-layout--with-toc` 自己宽 `calc(100% + 15.5rem)`
     （目录 14rem + 间距 1.5rem），**溢出到容器右边的留白里**；目录是普通网格项、
     `position: sticky; top: 2rem`。页头页脚仍是 `--container-size`，不受影响。

@@ -106,7 +106,7 @@ npx wrangler dev -c wrangler.e2e.jsonc --port 8788    # 另开一个终端
 curl -s http://127.0.0.1:8788/ | tail -3              # 看到「全部通过」即 OK
 ```
 
-断言集在 `scripts/e2e-runner.ts`（142 项）。`wrangler.e2e.jsonc` 只给本地用，**不要拿它部署**。
+断言集在 `scripts/e2e-runner.ts`（145 项）。`wrangler.e2e.jsonc` 只给本地用，**不要拿它部署**。
 （`wrangler dev` 需要写 `~/.wrangler/registry`，在受限沙箱里跑不起来。）
 
 ## 后台
@@ -212,6 +212,9 @@ wrangler secret put TURNSTILE_SECRET
   （`.post-layout--with-toc` 自己多一列，`position: sticky`），<80rem 折叠进正文顶部 `<details>`，
   两份静态 HTML 由 CSS 二选一，**零 JS**；滚动高亮是 `app.js` 的纯增量增强。
   ⚠️ 断点是从容器宽度手算的，改 `--container-size` 必须重算（算法在 style.css §11）
+- 三个索引页：`/categories/` 一行一条（只有 7 个，每条带描述）；`/tags/` 一行多个的**流式胶囊**，
+  宽度随内容；`/archives/` **按年份分组**，同一年的月份流式排列，年份之间用分隔线。
+  都不输出「共 N 个…」的说明行（数量对读者没用，还容易和实际渲染对不上）
 - 「关于」链到独立页面 `about`（`render.ts` 的 `ABOUT_SLUG`）；站点里没有这个 slug 时整条不渲染
 - 一次发布重建约 30~40 个对象；**删除一篇文章同样只重建受影响的 ~35 个**（`postDeleteTargets`），
   不是全站 800 个 —— 这条曾经是纯浪费

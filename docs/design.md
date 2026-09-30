@@ -308,6 +308,17 @@ CREATE TABLE permalink_history (
 形状上不会和现有 URL 撞：分类归档是 `/category/<slug>/`（**单数**）、独立页面带 `.html` 后缀、
 年月归档的段全是数字。三个索引页都**不做分页**（导航入口不该被拆成好几页），并进 sitemap。
 
+它们的**渲染形态不同**（`theme/overview.ts` 的 `layout` 参数）：
+
+- `/categories/`：只有 7 条、每条带一句描述，一行一条（默认 `list`）读起来最舒服；
+- `/tags/`：198 个标签，一行一条会拖成一屏半的竖直列表 → `flow` 流式胶囊，一行多个，
+  宽度随内容走；
+- `/archives/`：58 个月份 → 按**年份分组**（年份小标题 `<h2>`），同一年内月份 `flow` 排列。
+  年份之间用分隔线隔开。
+
+它们都**不再输出一句「共 N 个…」的说明文字** —— 数量对读者没用，而且容易和实际渲染
+不一致（`termItems` 会滤掉只挂在草稿上的术语）。
+
 > 「关于」指向独立页面 `about`（`src/publish/render.ts` 的 `ABOUT_SLUG`）。
 > 站点里没有这个 slug 的页面时整条导航项不渲染 —— 顶栏挂一个指向 404 的链接比少一条更糟。
 
@@ -937,7 +948,7 @@ cf-blog/
 │   ├── home.ts                    # 首页与分页
 │   ├── post.ts                    # 文章 / 独立页面（共用：独立页面只是没有上一篇/下一篇）
 │   ├── archive.ts                 # 分类 / 标签 / 年月归档
-│   ├── overview.ts                # 索引页 /categories/、/tags/、/archives/
+│   ├── overview.ts                # 索引页 /categories/（一行一条）/tags/（流式）/archives/（按年分组流式）
 │   ├── components/
 │   │   └── list.ts                # 已抽出：列表项 + 分页器（首页与归档共用）
 │   └── assets/                    # CSS / JS / 字体源文件，**构建时打指纹**（§7.2）
@@ -981,7 +992,7 @@ cf-blog/
 │   ├── hash-password.ts           # 生成 PBKDF2 串
 │   ├── build-assets.ts            # 主题资源打指纹 → theme/assets.generated.ts
 │   ├── bench-render.ts            # 渲染压测（§13.1 #4）：npm run bench:render
-│   ├── e2e-runner.ts              # 本地端到端断言集（142 项）
+│   ├── e2e-runner.ts              # 本地端到端断言集（145 项）
 │   ├── e2e-worker.ts              # e2e 的 Worker 入口，只在 wrangler.e2e.jsonc 里跑
 │   ├── upload-attachments.ts      # 附件迁移：按原路径把 usr/uploads 写进 R2
 │   └── publish-worker.ts          # 生产发布专用（只有 /full、/keys），配 wrangler.publish.jsonc
@@ -1443,8 +1454,9 @@ Typecho 很可能对两个候选都返回 200（文章同时属于两个分类�
 - 作者 byline 链到 `https://fengqi.me`（老站用户资料里的 url 字段）。要改就改 `users.url`。
 - **主题 CSS 已补齐**（2026-09-30）：指纹化写入 R2 + `<link>` 注入 + 暗色模式，见 §7.2。
 - **导航与版式改版**（2026-09-30，见 §5.1 / §11.1）：全站去掉侧栏，导航收进顶栏，
-  新增 `/categories/`、`/tags/`、`/archives/` 三个索引页（纯新增 URL），
-  文章页加服务端生成的两级目录，容器宽度**全站一档 50rem**（§11.1）。
+  新增 `/categories/`、`/tags/`、`/archives/` 三个索引页（纯新增 URL）；索引页排版：
+  `/categories/` 一行一条带描述，`/tags/` 流式胶囊一行多个，`/archives/` 按年份分组、
+  月份流式排列；文章页加服务端生成的两级目录，容器宽度**全站一档 50rem**（§11.1）。
   删除路径从「全站重写 800 个对象」收敛到「按影响面约 35 个」（§5.3）。
 - **索引页列为「已知边界」**：删掉某个月最后一篇文章时，那个月份对象会永久留在 R2 上（§5.3）。
   与旧实现一致，不是这次引入的。

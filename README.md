@@ -3,6 +3,7 @@
 基于 Cloudflare Workers 的博客系统。前台是纯静态、由 R2 直出；后台是一个 Worker，提供写作与管理界面。
 
 - 设计文档：[`docs/design.md`](docs/design.md)
+- **进度 / TODO：[`docs/todo.md`](docs/todo.md)** —— 已完成什么、下一步做什么、已知取舍
 - 建表脚本：[`docs/schema.sql`](docs/schema.sql) —— `migrations/0001_init.sql` 是它的副本，供 wrangler 使用
 
 ## 为什么这么搭

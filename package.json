@@ -5,6 +5,7 @@
     "dev": "wrangler dev",
     "typecheck": "tsc --noEmit",
     "bench:render": "tsx scripts/bench-render.ts",
+    "hash-password": "tsx scripts/hash-password.ts",
     "deploy": "wrangler deploy --minify",
     "deploy:ci": "wrangler d1 migrations apply blog-db --remote && npm run deploy",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings"

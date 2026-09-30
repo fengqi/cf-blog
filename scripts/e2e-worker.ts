@@ -10,10 +10,10 @@
  */
 
 import { runE2E } from './e2e-runner';
-import type { PublishEnv } from '../src/publish/pipeline';
+import type { E2EEnv } from './e2e-runner';
 
 export default {
-	async fetch(_request: Request, env: PublishEnv): Promise<Response> {
+	async fetch(_request: Request, env: E2EEnv): Promise<Response> {
 		try {
 			const report = await runE2E(env);
 			const failed = report.includes('项失败');
@@ -28,4 +28,4 @@ export default {
 			});
 		}
 	},
-} satisfies ExportedHandler<PublishEnv>;
+} satisfies ExportedHandler<E2EEnv>;

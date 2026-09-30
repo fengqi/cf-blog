@@ -52,6 +52,15 @@ export interface PublishEnv {
 	BUCKET: R2Bucket;
 }
 
+/**
+ * 只需要 `waitUntil` 这一个能力。
+ * 这样 Hono 的 `ExecutionContext<unknown>` 与 Workers 的 `ExecutionContext` 都能直接传进来，
+ * 路由单测里还能传一个把 promise 收集起来的假对象。
+ */
+export interface WaitUntilContext {
+	waitUntil(promise: Promise<unknown>): void;
+}
+
 export interface PublishReport {
 	cid?: number;
 	/** 同步写的对象（文章页本身） */
@@ -86,13 +95,18 @@ export async function renderAndSaveBody(
 	return { rendered, excerpt, words };
 }
 
-/** 目标清单按「同步 / 异步」切开（§6.3） */
+/**
+ * 目标清单按「同步 / 异步」切开（§6.3）。
+ *
+ * 同步 = 内容页本体**以及它自己的旧 URL 页**：旧 URL 的 canonical 必须和正文一起落盘，
+ * 否则在异步窗口里，旧地址会以「自己就是规范地址」的状态被爬虫看到（方案 A 就白做了）。
+ * 异步 = 首页、分页、归档、Feed、Sitemap。
+ */
 function splitTargets(targets: Target[]): { sync: Target[]; deferred: Target[] } {
 	const sync: Target[] = [];
 	const deferred: Target[] = [];
 	for (const target of targets) {
-		// 同步只写文章/独立页面本体；旧 URL 兼容页、首页、归档等都进异步
-		if ((target.kind === 'post' || target.kind === 'page') && !target.canonicalPath) sync.push(target);
+		if (target.kind === 'post' || target.kind === 'page') sync.push(target);
 		else deferred.push(target);
 	}
 	return { sync, deferred };
@@ -143,7 +157,7 @@ export async function ensureRendered(
  */
 export async function publishPost(
 	env: PublishEnv,
-	ctx: ExecutionContext | undefined,
+	ctx: WaitUntilContext | undefined,
 	cid: number,
 ): Promise<PublishReport> {
 	const db = createDb(env.DB, 'publish');
@@ -236,7 +250,7 @@ export async function publishAll(env: PublishEnv): Promise<PublishReport> {
  */
 export async function deletePost(
 	env: PublishEnv,
-	ctx: ExecutionContext | undefined,
+	ctx: WaitUntilContext | undefined,
 	cid: number,
 ): Promise<PublishReport> {
 	const db = createDb(env.DB, 'publish');

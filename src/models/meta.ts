@@ -45,6 +45,54 @@ export async function listTerms(db: Db, type: 'category' | 'tag'): Promise<TermR
 	return rows.map(toTerm);
 }
 
+/**
+ * 重算若干分类/标签的冗余计数（§4.2 ③ / §4.3）。
+ *
+ * 渲染其实不依赖 `metas.count`（见文件头），但后台列表要显示它。
+ * 改关系时把它一起刷新，避免长期偏差 —— 一条 SQL，不按 mid 循环。
+ */
+export function refreshMetaCountsStatement(db: Db, mids: number[]): D1PreparedStatement | null {
+	if (mids.length === 0) return null;
+	const placeholders = mids.map(() => '?').join(',');
+	return db.prepare(
+		`UPDATE metas
+		    SET count = (SELECT COUNT(*)
+		                   FROM relationships r
+		                   JOIN contents c ON c.cid = r.cid
+		                  WHERE r.mid = metas.mid AND c.type = 'post' AND c.status = 'publish')
+		  WHERE mid IN (${placeholders})`,
+		mids,
+	);
+}
+
+/**
+ * 按名字确保标签存在，返回它们的 mid。
+ *
+ * 新标签的 slug 就用名字本身（可能含中文，渲染时按 URL 编码 —— 实测可用，见 §9）。
+ * 两条 SQL：先 `INSERT OR IGNORE`，再一次性把 mid 查回来，不在循环里查。
+ */
+export async function ensureTags(db: Db, names: string[]): Promise<number[]> {
+	const cleaned = [...new Set(names.map((name) => name.trim()).filter(Boolean))];
+	if (cleaned.length === 0) return [];
+
+	await db.batch(
+		cleaned.map((name) =>
+			db.prepare(
+				`INSERT OR IGNORE INTO metas (name, slug, type, description, count, sort_order, parent)
+				 VALUES (?, ?, 'tag', NULL, 0, 0, 0)`,
+				[name, name],
+			),
+		),
+	);
+
+	const placeholders = cleaned.map(() => '?').join(',');
+	const rows = await db.all<{ mid: number }>(
+		`SELECT mid FROM metas WHERE type = 'tag' AND slug IN (${placeholders})`,
+		cleaned,
+	);
+	return rows.map((row) => row.mid);
+}
+
 /** 一次拿全部分类与标签（快照构建用）：一条 SQL，不按类型循环 */
 export async function listAllTerms(db: Db): Promise<TermRecord[]> {
 	const rows = await db.all<TermRow>(

@@ -129,3 +129,27 @@ export async function getSiteInfo(env: OptionsEnv): Promise<SiteInfo> {
 		timezoneOffset: options.timezoneOffset,
 	};
 }
+
+/**
+ * 读单个配置项。
+ * `options` 是通用的 key/value 表，后台自己用的配置（如 `turnstile_site_key`）
+ * 没必要塞进 `SiteOptions` —— 那是主题要的东西。
+ */
+export async function getOptionValue(db: Db, name: string): Promise<string | undefined> {
+	const row = await db.first<{ value: string | null }>(
+		'SELECT value FROM options WHERE name = ? AND user = 0 LIMIT 1',
+		[name],
+	);
+	return row?.value ?? undefined;
+}
+
+/** 写单个配置项（options 的主键是 (name, user)） */
+export async function setOptionValue(db: Db, name: string, value: string): Promise<void> {
+	await db.run(
+		`INSERT INTO options (name, user, value) VALUES (?, 0, ?)
+		 ON CONFLICT(name, user) DO UPDATE SET value = excluded.value`,
+		[name, value],
+	);
+	// 配置改了要让内存缓存失效（§7.3）
+	clearSiteOptionsCache();
+}

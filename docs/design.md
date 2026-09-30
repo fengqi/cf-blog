@@ -694,6 +694,11 @@ Workers 没有原生 bcrypt/argon2，用 WebCrypto 的 PBKDF2：
 2. 超了就先降到 50,000 —— 单用户博客，这个强度够用
 3. 降到 25,000 仍然超，再重新考虑方案
 
+> **已实测（2026-09，本地 workerd）**：10 万次迭代的 PBKDF2-SHA256 耗时 **约 7 ms**
+> （`scripts/e2e-runner.ts` 每次跑都会打印这个数）。10ms 预算下余量不大，但登录是
+> 「每天几十次」的请求，且 CPU 超限只影响这一次请求（1102），不会拖垮站点 ——
+> 所以**保持 10 万**，等线上 observability 能看到真实 CPU 时再决定要不要降到 5 万。
+
 > 不要为此引入 Durable Object。为一个登录接口加一套 DO 是明显的过度设计，而且 DO 的请求
 > 也要占额度、还要维护额外状态。这里的问题用降迭代数就能解决。
 
@@ -741,6 +746,16 @@ wrangler d1 execute blog-db --remote --command \
 3. **强制口令强度**：初始密码 `admin` 必须首次登录即改，并校验长度与复杂度
 
 **IP 存哈希不存明文**（`SHA-256(ip + IP_SALT)`），既能做频率统计又不落隐私数据。
+
+> **实现记录（2026-09）**：Turnstile 的 site key 存在 `options.turnstile_site_key`
+> （不是 secret）。强制校验的条件是**密钥与 site key 都配了**；只配一半时只渲染控件、
+> 不强制 —— 否则会出现「服务端要 token，而登录页因为缺 site key 不渲染控件」，
+> 等于把自己锁在门外（口令与限流本来就在）。
+>
+> 失败计数用 KV（`LOGIN_KV`）：同 IP 15 分钟内失败 10 次锁定，`expirationTtl` 自动过期。
+
+> ⚠️ **口径**：`/admin/login` 是**唯一公开路由**；`/admin/*`、`/preview/*` 都要登录。
+> 注册顺序有讲究（公开路由必须在鉴权中间件之前），本地 e2e 里有断言盯着这条边界。
 
 ---
 
@@ -865,16 +880,16 @@ cf-blog/
 │       ├── style.css
 │       └── app.js
 ├── src/
-│   ├── index.ts                   # Worker 入口（后台）
+│   ├── index.ts                   # Worker 入口（后台）+ Cron
+│   ├── types.ts                   # Env 绑定 + 运行时密钥类型（secret 生成不出来）
 │   ├── views/                     # ★ 后台页面组件（Hono JSX，.tsx）
-│   │   ├── layout.tsx             # 后台骨架
+│   │   ├── layout.tsx             # 后台骨架（样式内联，无构建链）
 │   │   ├── login.tsx
 │   │   ├── post-editor.tsx
-│   │   ├── post-list.tsx
-│   │   └── settings.tsx
-│   ├── routes/
-│   │   ├── admin.ts               # 后台页面与操作
-│   │   ├── auth.ts                # 登录 / 登出
+│   │   └── post-list.tsx
+│   ├── routes/                    # 会渲染 JSX，所以是 .tsx
+│   │   ├── admin.tsx              # 后台页面与操作（保存即发布）
+│   │   ├── auth.tsx               # 登录 / 登出（Turnstile + 失败限流）
 │   │   └── preview.ts             # 草稿预览（R2 里还不存在的对象）
 │   ├── publish/                   # ★ 发布流水线，本方案的核心
 │   │   ├── pipeline.ts            # 编排：渲染 → 写 D1 → 写 R2 → 异步重建
@@ -1059,11 +1074,14 @@ npx tsx scripts/import-typecho.ts --full-publish
 | 2 | 文章页少了标签那一行、标签链接全丢 | 同一个原因：列表查询只聚合了分类，没聚合标签 | 列表查询聚合**分类 + 标签** |
 | 3 | 定时发布上线后是空壳页面 | Cron 只把 `waiting` 改成 `publish`，但这类文章从没走过「保存并发布」，`rendered` 一直是空的 | 加 `ensureRendered()`：写 R2 之前把 `rendered` 为空的内容补渲染（§6.4 的 Cron 兜底） |
 
-另外两个小的：
+另外三个小的：
 
 - **`deletePost` 必须先删 D1 行再删对象**，否则后面的全站重建会把文章又写回去。
 - **独立页面不能复用文章的目标计算**：页面没有分类，`postKeyOf()` 会抛错；
   而且页面不出现在首页/归档/Feed 里，只有它自己和 sitemap 需要重建。
+- **改缩略名后，旧 URL 的 canonical 必须一起写**：`postPublishTargets` 一开始没把
+  「这篇文章自己的旧 URL」放进清单，结果旧地址继续以「自己就是规范地址」对外服务 ——
+  方案 A 等于没做。修法：旧 URL 目标进**同步**批次，和正文一起落盘。
 
 ---
 

@@ -25,5 +25,19 @@
 			"bucket_name": "blog-content",
 			"binding": "BUCKET"
 		}
-	]
+	],
+	"kv_namespaces": [
+		{
+			"binding": "LOGIN_KV",
+			"id": "11b1f3eab4b24348bd94d03d9e449313"
+		}
+	],
+	/**
+	 * 测试用的假密钥（只在本地 e2e 里生效）。
+	 * 刻意**不配 TURNSTILE_SECRET** —— 服务端会跳过人机校验，方便本地跑通登录流程。
+	 */
+	"vars": {
+		"SESSION_SECRET": "e2e-session-secret-not-for-production",
+		"IP_SALT": "e2e-ip-salt"
+	}
 }

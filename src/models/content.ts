@@ -10,6 +10,7 @@
  */
 
 import type { Db } from '../lib/db';
+import { refreshMetaCountsStatement } from './meta';
 import type { MonthRecord, PostRecord, TermRecord } from '../publish/types';
 
 /** 聚合分类/标签的公共子查询；`type` 传 null 表示全都聚合 */
@@ -172,6 +173,241 @@ export async function listRetiredPermalinks(db: Db): Promise<{ cid: number; key:
 		   JOIN contents c ON c.cid = h.cid
 		  WHERE c.status = 'publish'
 		  ORDER BY h.retired_at DESC`,
+	);
+}
+
+// ---------------------------------------------------------------------------
+// 后台列表与编辑器
+// ---------------------------------------------------------------------------
+
+export interface AdminPostRow {
+	cid: number;
+	title: string;
+	slug: string;
+	type: 'post' | 'page';
+	status: string;
+	created: number;
+	modified: number;
+	words: number;
+	needs_sync: number;
+	excerpt: string | null;
+	categories: TermRecord[];
+}
+
+/**
+ * 后台文章列表 —— **刻意不回捞 `rendered`**（§5.2：要精简查询就单独开一个，
+ * 别去动 `listPublishedPosts`，那个是给渲染用的，必须「渲染完备」）。
+ */
+export async function listAdminPosts(db: Db, limit = 200): Promise<AdminPostRow[]> {
+	const rows = await db.all<ContentRow & { needs_sync: number }>(
+		`SELECT c.cid, c.title, c.slug, c.type, c.status, c.created, c.modified, c.words,
+		        c.needs_sync, c.excerpt, ${metaAggregate('category')} AS categories
+		   FROM contents c
+		  WHERE c.type IN ('post','page')
+		  ORDER BY c.created DESC, c.cid DESC
+		  LIMIT ?`,
+		[limit],
+	);
+	return rows.map((row) => ({
+		cid: row.cid,
+		title: row.title,
+		slug: row.slug,
+		type: row.type === 'page' ? 'page' : 'post',
+		status: row.status ?? 'draft',
+		created: row.created,
+		modified: row.modified,
+		words: row.words,
+		needs_sync: row.needs_sync,
+		excerpt: row.excerpt,
+		categories: parseTerms(row.categories),
+	}));
+}
+
+/** 编辑器视图：Markdown 原文 + 关系（分类 mid、标签名）—— 一条 SQL */
+export interface EditorView {
+	cid: number;
+	title: string;
+	slug: string;
+	body: string;
+	excerpt: string;
+	status: string;
+	type: 'post' | 'page';
+	created: number;
+	allow_feed: number;
+	categoryIds: number[];
+	tagNames: string[];
+}
+
+export async function getEditorView(db: Db, cid: number): Promise<EditorView | null> {
+	const row = await db.first<{
+		cid: number;
+		title: string;
+		slug: string;
+		body: string;
+		excerpt: string | null;
+		status: string;
+		type: string;
+		created: number;
+		allow_feed: number;
+		category_ids: string | null;
+		tag_names: string | null;
+	}>(
+		`SELECT c.cid, c.title, c.slug, c.body, c.excerpt, c.status, c.type, c.created, c.allow_feed,
+		        (SELECT json_group_array(m.mid) FROM relationships r JOIN metas m ON m.mid = r.mid
+		          WHERE r.cid = c.cid AND m.type = 'category') AS category_ids,
+		        (SELECT json_group_array(m.name) FROM relationships r JOIN metas m ON m.mid = r.mid
+		          WHERE r.cid = c.cid AND m.type = 'tag') AS tag_names
+		   FROM contents c
+		  WHERE c.cid = ?
+		  LIMIT 1`,
+		[cid],
+	);
+	if (!row) return null;
+
+	return {
+		cid: row.cid,
+		title: row.title,
+		slug: row.slug,
+		body: row.body,
+		excerpt: row.excerpt ?? '',
+		status: row.status,
+		type: row.type === 'page' ? 'page' : 'post',
+		created: row.created,
+		allow_feed: row.allow_feed,
+		categoryIds: parseNumberArray(row.category_ids),
+		tagNames: parseStringArray(row.tag_names),
+	};
+}
+
+function parseNumberArray(value: string | null): number[] {
+	try {
+		const parsed: unknown = JSON.parse(value ?? '[]');
+		return Array.isArray(parsed) ? (parsed as number[]) : [];
+	} catch {
+		return [];
+	}
+}
+
+function parseStringArray(value: string | null): string[] {
+	try {
+		const parsed: unknown = JSON.parse(value ?? '[]');
+		return Array.isArray(parsed) ? (parsed as string[]) : [];
+	} catch {
+		return [];
+	}
+}
+
+export interface ContentInput {
+	title: string;
+	slug: string;
+	body: string;
+	excerpt: string;
+	status: string;
+	created: number;
+	allowFeed: number;
+	type: 'post' | 'page';
+}
+
+/**
+ * 新建内容。
+ *
+ * **缩略名为空时用 cid 兜底**（§5.1：「`<slug>` 未填缩略名时即 cid」）——
+ * 所以先插入拿到 cid，再回填 slug（两条语句）。
+ */
+export async function createContent(db: Db, input: ContentInput, authorId: number): Promise<number> {
+	const now = Math.floor(Date.now() / 1000);
+	const result = await db.run(
+		`INSERT INTO contents (title, slug, created, modified, body, rendered, excerpt, sort_order,
+		                       author_id, type, status, allow_feed, parent, words, needs_sync)
+		 VALUES (?, ?, ?, ?, ?, '', ?, 0, ?, ?, ?, ?, 0, 0, 1)`,
+		[
+			input.title,
+			input.slug.trim(),
+			input.created,
+			now,
+			input.body,
+			input.excerpt,
+			authorId,
+			input.type,
+			input.status,
+			input.allowFeed,
+		],
+	);
+	const cid = Number(result.meta.last_row_id);
+	if (!input.slug.trim()) {
+		await db.run('UPDATE contents SET slug = ? WHERE cid = ?', [String(cid), cid]);
+	}
+	return cid;
+}
+
+/** 更新正文字段；`rendered` 由发布流水线负责（不在这里拼 HTML） */
+export async function updateContentFields(db: Db, cid: number, input: ContentInput): Promise<void> {
+	await db.run(
+		`UPDATE contents
+		    SET title = ?, slug = ?, body = ?, excerpt = ?, status = ?, created = ?,
+		        allow_feed = ?, modified = ?
+		  WHERE cid = ?`,
+		[
+			input.title,
+			input.slug.trim(),
+			input.body,
+			input.excerpt,
+			input.status,
+			input.created,
+			input.allowFeed,
+			Math.floor(Date.now() / 1000),
+			cid,
+		],
+	);
+	if (!input.slug.trim()) {
+		await db.run('UPDATE contents SET slug = ? WHERE cid = ?', [String(cid), cid]);
+	}
+}
+
+/**
+ * 重设内容与分类/标签的关系。
+ *
+ * §4.3 的坑：改分类时新旧 meta 的 count 要在**同一个 batch** 里一起更新。
+ * 这里把「删关系 + 插关系 + 刷新计数」放进一次 `db.batch()` —— 一次往返、一个事务。
+ */
+export async function setContentTerms(
+	db: Db,
+	cid: number,
+	categoryIds: number[],
+	tagIds: number[],
+	currentCategoryIds: number[],
+	currentTagIds: number[],
+): Promise<void> {
+	const affected = [...new Set([...currentCategoryIds, ...currentTagIds, ...categoryIds, ...tagIds])];
+	const statements: D1PreparedStatement[] = [
+		db.prepare('DELETE FROM relationships WHERE cid = ?', [cid]),
+		...[...categoryIds, ...tagIds].map((mid) =>
+			db.prepare('INSERT OR IGNORE INTO relationships (cid, mid) VALUES (?, ?)', [cid, mid]),
+		),
+	];
+	const refresh = refreshMetaCountsStatement(db, affected);
+	if (refresh) statements.push(refresh);
+	await db.batch(statements);
+}
+
+/** §6.5「全站重新渲染」：把所有已发布内容标脏，交给 Cron 逐批重建 */
+export async function markAllDirty(db: Db): Promise<number> {
+	const result = await db.run(
+		`UPDATE contents SET needs_sync = 1 WHERE type IN ('post','page') AND status = 'publish'`,
+	);
+	return result.meta.changes ?? 0;
+}
+
+/**
+ * 记下旧 permalink（§4.2 ⑤）。
+ *
+ * 文章 URL 含分类 slug，**改分类或改缩略名都会让 URL 变化**。旧 key 不删，
+ * 改写成带 canonical 的页面（§5.1 方案 A）—— 前提是这里留了痕。
+ */
+export async function recordPermalink(db: Db, cid: number, key: string): Promise<void> {
+	await db.run(
+		`INSERT OR REPLACE INTO permalink_history (cid, permalink, retired_at) VALUES (?, ?, ?)`,
+		[cid, key, Math.floor(Date.now() / 1000)],
 	);
 }
 

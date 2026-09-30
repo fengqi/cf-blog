@@ -61,6 +61,23 @@ curl -s http://127.0.0.1:8788/ | tail -3              # 看到「全部通过」
 断言集在 `scripts/e2e-runner.ts`（68 项）。`wrangler.e2e.jsonc` 只给本地用，**不要拿它部署**。
 （`wrangler dev` 需要写 `~/.wrangler/registry`，在受限沙箱里跑不起来。）
 
+## 后台
+
+登录地址：`https://admin-blog.fengqi.me/admin`（走 Worker，与前台 R2 完全分开）。
+
+**首次使用必须先设置管理员口令。** `migrations/0001_init.sql` 给 admin 写的是**不可用的占位哈希**
+（刻意的 fail-closed，不留默认弱口令），照它建库是登不进去的：
+
+```bash
+npm run hash-password -- '你的口令'    # 输出含已转义的 wrangler 命令，直接复制执行
+```
+
+后台能做的事：写/改文章与独立页面（**保存即发布**到 R2）、预览草稿、删除文章、
+「全站重新渲染」（只标脏，由 Cron 每小时 20 篇逐批重建 —— 见 design.md §6.5）。
+
+- 登录保护：Turnstile（`options.turnstile_site_key` + `TURNSTILE_SECRET`，**两者都配才强制**）+ 同 IP 15 分钟失败 10 次锁定
+- `/admin/*`、`/preview/*` 需要登录；`/admin/login` 是唯一公开路由
+
 ## 资源与绑定
 
 `wrangler.jsonc` 里已配好，绑定名统一 UPPER_SNAKE：

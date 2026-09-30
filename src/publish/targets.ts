@@ -143,6 +143,16 @@ export function postPublishTargets(snapshot: SiteSnapshot, post: PostRecord): Ta
 		for (const target of termTargets(tag, perPage, tagKey)) wanted.add(target.key);
 	}
 
+	/**
+	 * **这篇文章自己的旧 URL 也要重建**（§5.1 方案 A）。
+	 *
+	 * 少了这一步，改缩略名之后旧 URL 会继续以「自己就是规范地址」的状态对外服务 ——
+	 * 方案 A 的 canonical 根本没写上去（本地 e2e 抓到的第四个 bug）。
+	 */
+	for (const retired of snapshot.retired) {
+		if (retired.cid === post.cid) wanted.add(retired.key);
+	}
+
 	const created = monthOf(post.created, snapshot.site.timezoneOffset);
 	wanted.add(monthKey(created.year, created.month));
 	wanted.add(FEED_KEY);

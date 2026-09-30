@@ -37,3 +37,34 @@ export function formatRfc822(timestamp: number): string {
 		`${String(date.getUTCSeconds()).padStart(2, '0')} +0000`
 	);
 }
+
+/**
+ * `<input type="datetime-local">` 的值（按**站点时区**）：`2026-09-30T14:05`
+ *
+ * 编辑器和展示必须用同一套时区语义，否则作者看到的发布时间会和前台差几个小时。
+ */
+export function formatDateTimeLocal(timestamp: number, offsetHours = 8): string {
+	const shifted = new Date((timestamp + offsetHours * 3600) * 1000);
+	const pad = (value: number) => String(value).padStart(2, '0');
+	return (
+		`${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}` +
+		`T${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}`
+	);
+}
+
+/** 解析 `datetime-local` 的值（按站点时区）→ Unix 秒；非法输入返回 null */
+export function parseDateTimeLocal(value: string, offsetHours = 8): number | null {
+	const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value.trim());
+	if (!match) return null;
+	const [, year, month, day, hour, minute, second] = match;
+	const utc = Date.UTC(
+		Number(year),
+		Number(month) - 1,
+		Number(day),
+		Number(hour),
+		Number(minute),
+		Number(second ?? 0),
+	);
+	if (Number.isNaN(utc)) return null;
+	return Math.floor(utc / 1000) - offsetHours * 3600;
+}

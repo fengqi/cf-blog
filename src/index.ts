@@ -3,16 +3,36 @@
  *
  * 这个 Worker **只服务后台**（`admin-blog.fengqi.me`）：前台由 R2 直出，一个请求都不进这里。
  * 所以这里出现的东西永远只有两类：后台页面/接口，以及 Cron。
+ *
+ * 路由注册顺序有讲究：`/admin/login`、`/admin/logout` 是公开的，**必须注册在鉴权中间件之前**；
+ * 之后注册的 `/admin/*` 才会被 `requireAuth` 拦住。本地 e2e 里有断言盯着这条边界。
  */
 
 import { Hono } from 'hono';
+import { requireAuth } from './middleware/auth';
+import { adminRoutes } from './routes/admin';
+import { authRoutes } from './routes/auth';
+import { previewRoutes } from './routes/preview';
 import { runScheduledTasks } from './publish/sync';
+import type { AdminEnv } from './types';
 
-const app = new Hono<{ Bindings: CloudflareBindings }>();
+export const app = new Hono<{ Bindings: AdminEnv }>();
 
-app.get('/message', (c) => {
-	return c.text('Hello Hono!');
-});
+// 健康检查（部署后确认 Worker 活着）
+app.get('/message', (c) => c.text('Hello Hono!'));
+
+// ① 公开路由：登录 / 登出
+app.route('/', authRoutes);
+
+// ② 鉴权：下面注册的 /admin/* 与 /preview/* 都要登录
+app.use('/admin/*', requireAuth);
+app.use('/preview/*', requireAuth);
+
+// ③ 受保护的后台与预览
+app.route('/', adminRoutes);
+app.route('/', previewRoutes);
+
+app.get('/', (c) => c.redirect('/admin', 302));
 
 export default {
 	fetch: app.fetch,
@@ -34,4 +54,4 @@ export default {
 				}),
 		);
 	},
-} satisfies ExportedHandler<CloudflareBindings>;
+} satisfies ExportedHandler<AdminEnv>;

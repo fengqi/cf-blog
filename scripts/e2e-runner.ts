@@ -15,12 +15,23 @@
  * 夹具 SQL 属于测试代码，不受「SQL 只能写在 src/models」约束；应用代码里的 SQL 仍然只在 models/ 与 lib/db.ts。
  */
 
-import { deletePost, publishAll, publishPost, renderPreview } from '../src/publish/pipeline';
-import type { PublishEnv } from '../src/publish/pipeline';
+import { app } from '../src/index';
+import { hashPassword, verifyPassword } from '../src/lib/auth';
 import { createDb } from '../src/lib/db';
 import { getContentByCid } from '../src/models/content';
+import { clearSiteOptionsCache } from '../src/models/option';
+import { deletePost, publishAll, publishPost, renderPreview } from '../src/publish/pipeline';
+import type { PublishEnv } from '../src/publish/pipeline';
 import { loadSnapshot } from '../src/publish/snapshot';
 import { runScheduledTasks } from '../src/publish/sync';
+
+/** e2e 用的绑定：发布所需 + 后台登录所需（密钥来自 wrangler.e2e.jsonc 的 vars） */
+export type E2EEnv = PublishEnv & {
+	LOGIN_KV: KVNamespace;
+	SESSION_SECRET: string;
+	IP_SALT: string;
+	TURNSTILE_SECRET?: string;
+};
 
 const CATEGORY_MID = 1; // schema 里种子数据自带的「默认分类 / default」
 
@@ -42,7 +53,7 @@ const XSS_BODY = [
 	'```',
 ].join('\n');
 
-export async function runE2E(env: PublishEnv): Promise<string> {
+export async function runE2E(env: E2EEnv): Promise<string> {
 	const lines: string[] = [];
 	let failures = 0;
 
@@ -71,6 +82,8 @@ export async function runE2E(env: PublishEnv): Promise<string> {
 	await run("UPDATE metas SET name = 'Other', slug = 'default', description = '生活琐事' WHERE mid = ?", [CATEGORY_MID]);
 	await run("INSERT OR REPLACE INTO options (name, user, value) VALUES ('timezone', 0, '28800')");
 	await run("INSERT OR REPLACE INTO options (name, user, value) VALUES ('posts_per_page', 0, '10')");
+	// options 在 isolate 内有 60 秒缓存，夹具改了配置必须主动失效（§7.3）
+	clearSiteOptionsCache();
 
 	await run("INSERT INTO metas (mid, name, slug, type, description, count, sort_order, parent) VALUES (20, '安卓', '安卓', 'tag', NULL, 0, 0, 0)");
 	await run("INSERT INTO metas (mid, name, slug, type, description, count, sort_order, parent) VALUES (21, 'Cloudflare', 'cloudflare', 'tag', NULL, 0, 0, 0)");
@@ -190,7 +203,14 @@ export async function runE2E(env: PublishEnv): Promise<string> {
 	} as unknown as ExecutionContext;
 
 	const report = await publishPost(env, ctx, 100);
-	check('同步写只写文章本体', report.sync?.written.length === 1 && report.sync.written[0] === 'default/hello.html', JSON.stringify(report.sync?.written));
+	// 同步批次 = 文章本体 + 它自己的旧 URL 页（旧 URL 的 canonical 必须同时落盘，§5.1 方案 A）
+	check(
+		'同步写只写文章本体与它自己的旧 URL',
+		report.sync?.written.includes('default/hello.html') === true &&
+			report.sync.written.length === 2 &&
+			report.sync.written.every((key) => key === 'default/hello.html' || key === 'default/old-hello.html'),
+		JSON.stringify(report.sync?.written),
+	);
 	check('其余对象交给 waitUntil（§6.3）', report.deferred === undefined && waits.length > 0, `waitUntil 任务数 ${waits.length}`);
 	await Promise.allSettled(waits);
 
@@ -302,6 +322,121 @@ export async function runE2E(env: PublishEnv): Promise<string> {
 	check('文章 key 已消失', !afterDelete.includes('default/hello.html'));
 	check('旧 permalink 一并清理', !afterDelete.includes('default/old-hello.html'));
 	check('归档已按剩余内容重建', afterDelete.includes('category/default/'));
+
+	// -----------------------------------------------------------------------
+	// 8. 后台 HTTP 层：登录、会话、表单发布、方案 A、重建、删除
+	// -----------------------------------------------------------------------
+	lines.push('=== 后台口令（PBKDF2）===');
+	const hashStart = performance.now();
+	const passwordHash = await hashPassword('e2e-口令-123', 100_000);
+	const hashMs = performance.now() - hashStart;
+	await run('UPDATE users SET password = ?, token_version = token_version + 1 WHERE username = ?', [
+		passwordHash,
+		'admin',
+	]);
+	check('生成 PBKDF2 串并写库', passwordHash.startsWith('pbkdf2$100000$'), `${hashMs.toFixed(1)} ms（§8.2 要求 < 10ms 需复核）`);
+	check('口令校验通过', await verifyPassword('e2e-口令-123', passwordHash));
+	check('错误口令不通过', !(await verifyPassword('wrong', passwordHash)));
+
+	lines.push('=== 后台路由与会话 ===');
+	// 复用第 3 节那个 waitUntil 收集器（同一个变量名在这里会重复声明）
+	const call = (path: string, init?: RequestInit) =>
+		app.request(path, init, env as never, ctx as never);
+	const postForm = (path: string, fields: Record<string, string>, cookie?: string) =>
+		call(path, {
+			method: 'POST',
+			body: new URLSearchParams(fields),
+			headers: cookie ? { cookie } : {},
+		});
+
+	// 未登录：受保护路径必须重定向
+	const noAuth = await call('/admin');
+	check('未登录访问 /admin 会跳登录页', noAuth.status === 302 && (noAuth.headers.get('location') ?? '').includes('/admin/login'), `${noAuth.status} → ${noAuth.headers.get('location')}`);
+	const noAuthPreview = await call('/preview/300');
+	check('未登录访问预览会跳登录页', noAuthPreview.status === 302);
+	check('受保护响应是 private, no-store', (noAuth.headers.get('cache-control') ?? '') === 'private, no-store', String(noAuth.headers.get('cache-control')));
+
+	const loginPage = await call('/admin/login');
+	const loginHtml = await loginPage.text();
+	check('登录页可访问（公开路由没被鉴权拦掉）', loginPage.status === 200 && loginHtml.includes('name="password"'));
+	check('口令已 bootstrap，不再提示初始化', !loginHtml.includes('还没有设置管理员口令'));
+
+	// 配了 site key（Cloudflare 的测试 key）就应该渲染控件；但没有 TURNSTILE_SECRET 时不强制校验
+	await run("INSERT OR REPLACE INTO options (name, user, value) VALUES ('turnstile_site_key', 0, '1x00000000000000000000AA')");
+	const loginWithWidget = await (await call('/admin/login')).text();
+	check('配了 site key 就渲染 Turnstile 控件', loginWithWidget.includes('cf-turnstile') && loginWithWidget.includes('turnstile/v0/api.js'));
+
+	const badLogin = await postForm('/admin/login', { username: 'admin', password: 'wrong' });
+	check('错误口令被拒', badLogin.status === 401 && (await badLogin.text()).includes('用户名或口令不正确'), String(badLogin.status));
+
+	const goodLogin = await postForm('/admin/login', { username: 'admin', password: 'e2e-口令-123' });
+	const setCookie = goodLogin.headers.get('set-cookie') ?? '';
+	const sessionCookie = setCookie.split(';')[0];
+	check('正确口令登录成功', goodLogin.status === 303 && sessionCookie.startsWith('blog_session='), `${goodLogin.status}`);
+	check('Cookie 是 HttpOnly + Secure + SameSite=Lax', /HttpOnly/i.test(setCookie) && /Secure/i.test(setCookie) && /SameSite=Lax/i.test(setCookie));
+
+	const listPage = await call('/admin', { headers: { cookie: sessionCookie } });
+	const listHtml = await listPage.text();
+	check('登录后能进文章列表', listPage.status === 200 && listHtml.includes('第 2 篇'));
+
+	// 走表单改缩略名 —— 顺便验证 §5.1 方案 A（旧 URL 保留 canonical）
+	const editView = await call('/admin/posts/101/edit', { headers: { cookie: sessionCookie } });
+	check('编辑器能打开', editView.status === 200 && (await editView.text()).includes('name="body"'));
+
+	const publishForm = await postForm(
+		'/admin/posts/101',
+		{
+			title: '改过标题的第 2 篇',
+			slug: 'renamed-post',
+			type: 'post',
+			status: 'publish',
+			created: '2026-09-29T13:00',
+			body: '# 新标题\n\n表单发布的内容 <script>alert(7)</script>。',
+			excerpt: '',
+			categories: '1',
+			tags: '安卓, 表单标签',
+			allow_feed: '1',
+		},
+		sessionCookie,
+	);
+	check('表单保存返回 303', publishForm.status === 303, String(publishForm.status));
+	await Promise.allSettled(waits.splice(0));
+
+	const keysAfterEdit = (await env.BUCKET.list()).objects.map((object) => object.key);
+	check('新 URL 已生成', keysAfterEdit.includes('default/renamed-post.html'));
+	check('旧 URL 仍在（§5.1 方案 A）', keysAfterEdit.includes('default/post-2.html'));
+	const renamedHtml = (await (await env.BUCKET.get('default/renamed-post.html'))?.text()) ?? '';
+	check('新页面正文来自表单且已清洗', renamedHtml.includes('表单发布的内容') && !renamedHtml.includes('<script>alert(7)'));
+	check('新页面显示了新标签', renamedHtml.includes('表单标签'));
+	const excerptRow = await all<{ excerpt: string }>('SELECT excerpt FROM contents WHERE cid = 101');
+	check('自动摘要已生成并落库', excerptRow[0].excerpt.includes('新标题') && !excerptRow[0].excerpt.includes('<'), excerptRow[0].excerpt.slice(0, 20));
+	const retiredHtml = (await (await env.BUCKET.get('default/post-2.html'))?.text()) ?? '';
+	const retiredCanonical = /<link rel="canonical" href="([^"]+)"/.exec(retiredHtml)?.[1];
+	check('旧 URL 的 canonical 指向新地址', retiredCanonical === 'https://blog.fengqi.me/default/renamed-post.html', String(retiredCanonical));
+
+	// 全站重建：只标脏，交给 Cron（§6.5）
+	const rebuild = await postForm('/admin/rebuild', {}, sessionCookie);
+	const dirtyCount = await all<{ count: number }>("SELECT COUNT(*) AS count FROM contents WHERE needs_sync = 1 AND status = 'publish'");
+	check('「全站重新渲染」把内容标脏', rebuild.status === 303 && dirtyCount[0].count > 0, `待同步 ${dirtyCount[0].count}`);
+	const drain = await runScheduledTasks(env);
+	check('Cron 逐批清掉脏标记', drain.needsSync === 0, `本轮重建 ${drain.rebuilt.length} 篇 / ${drain.objects} 个对象`);
+
+	// 草稿预览（登录态）
+	const previewOk = await call('/preview/300', { headers: { cookie: sessionCookie } });
+	const previewHtml = await previewOk.text();
+	check('登录后能预览草稿', previewOk.status === 200 && previewHtml.includes('草稿标题'));
+	check('预览带 noindex', (previewOk.headers.get('x-robots-tag') ?? '').includes('noindex'));
+
+	// 表单删除
+	const deleteForm = await postForm('/admin/posts/101/delete', {}, sessionCookie);
+	await Promise.allSettled(waits.splice(0));
+	const keysAfterDelete = (await env.BUCKET.list()).objects.map((object) => object.key);
+	check('表单删除返回 303', deleteForm.status === 303);
+	check('文章与旧 URL 都被清掉', !keysAfterDelete.includes('default/renamed-post.html') && !keysAfterDelete.includes('default/post-2.html'));
+
+	// 登出
+	const logout = await postForm('/admin/logout', {}, sessionCookie);
+	check('登出清 Cookie', logout.status === 303 && /blog_session=;/.test(logout.headers.get('set-cookie') ?? ''));
 
 	// -----------------------------------------------------------------------
 	// 产物（交给外部 XML 校验）

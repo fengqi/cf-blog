@@ -10,7 +10,7 @@
 ## 一句话现状
 
 - **前台** <https://blog.fengqi.me/> —— 已是一个完整博客：Typecho 迁移完成，**803 个渲染对象 / 227 条内容 / 67 个附件**，556 条老站 URL 对账 **零意外失败**。
-- **后台** <https://admin-blog.fengqi.me/admin> —— 可登录、写/改文章（保存即发布）、预览草稿、删除、站点设置页（标题/描述/关键词/域名/时区/每页篇数/Turnstile site key）、媒体库（上传/列表/复制链接）、改口令、全站重建入口（分批循环当场刷完）。
+- **后台** <https://admin-blog.fengqi.me/admin> —— 可登录、写/改文章（保存即发布）、预览草稿、删除、分类管理、站点设置页（标题/描述/关键词/域名/时区/每页篇数/Turnstile site key）、媒体库（上传/列表/复制链接）、改口令、全站重建入口（两阶段：刷全站对象 + 补发待同步）。
 - **主题已上线** —— 指纹化 CSS/JS 写入 R2（`immutable`）、**全站零侧栏 + 顶栏导航**、文章页服务端目录、暗色模式、轻量代码高亮。
 - **老站 `fengqi.me` 仍在服务 Typecho**，两边并行；域名切换由 ⑪ 决定。
 
@@ -31,6 +31,7 @@
 | ✅ | **后台媒体库（④）** | `/admin/media`（顶栏「媒体」）：multipart 上传到 R2 `usr/uploads/<年>/<月>/<文件名>`（站点时区、按扩展名白名单 jpg/png/webp/gif/avif/pdf、≤10MB）+ 列表（D1 `type='attachment'`，与迁移来的 62 个同清单）+ 链接一键复制（几行原生 JS）。**immutable 纪律：同 key 已存在拒绝覆盖**（R2 `head` 先查），要换图换文件名。R2 写入收在 `src/publish/attachments.ts`（§11 纪律 2）；附件 `needs_sync=0` 不进渲染流水线 |
 | ✅ | **后台改口令页（⑤）** | `/admin/password`（顶栏「口令」）：校验当前口令 → PBKDF2（10 万次迭代）落库 → `token_version += 1`，**全部旧会话（含当前）立刻失效**，跳登录页用新口令重登 |
 | ✅ | **「全站重渲」按钮改分批循环（⑥）** | 文章列表页按钮被几行原生 JS 拦截，循环调 `POST /admin/rebuild/full`（50 个/批）直到 `nextOffset=null`，实时显示 `x / total` 与失败数 —— 改模板/样式后**当场刷完**，不再等 Cron 慢磨。无 JS 时降级为原行为（标脏交给 Cron） |
+| ✅ | **后台分类管理** | `/admin/categories`（顶栏「分类」）：创建/改名/改 slug/改描述/删除。**URL 影响面自动处理**：分类 slug 嵌在文章 URL 里，主分类（mid 最小）决定地址 —— 改 slug 或删除时，受影响文章自动记旧地址（方案 A 保留 canonical）+ 标脏，由补发对账收敛；旧分类归档对象直接删（方案 A 只承诺文章 URL）；删除守卫：有文章只挂在这个分类时拒绝。重渲按钮升级为两阶段：先分批刷全站对象，再循环补发「待同步」直到清零 |
 | ✅ | 保真与语义验证 | 逐句比对老站页面（手写 HTML 老文章 / markdown 近期文章 / hidden 文章 / 独立页面）全部命中；`<font color>` 保留 9 处；hidden 页面 200 且不进首页/Feed/sitemap；老站上 500 的 `/memos.html`、`/pocket.html` 现在正常；`/sitemap.xml` 从无到有 |
 
 ---
@@ -84,7 +85,7 @@
 # 主题资源打指纹（改了 theme/assets/ 之后必跑）
 npm run build:assets
 
-# 本地端到端断言（真实 workerd + 本地 D1/R2/KV，167 项）
+# 本地端到端断言（真实 workerd + 本地 D1/R2/KV，182 项）
 npx wrangler d1 migrations apply blog-db --local
 npx wrangler dev -c wrangler.e2e.jsonc --port 8788
 curl -s http://127.0.0.1:8788/ | tail -3          # 看到「全部通过」

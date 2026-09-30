@@ -106,3 +106,51 @@ export async function listAllTerms(db: Db): Promise<TermRecord[]> {
 	);
 	return rows.map(toTerm);
 }
+
+// ---------------------------------------------------------------------------
+// 后台分类管理 —— 分类 slug 直接嵌在文章 URL（/<category>/<slug>.html）里，
+// 改/删的影响面在 routes/admin.tsx 里算，这里只管数据。
+// ---------------------------------------------------------------------------
+
+/** 按 slug 查分类（查重用）；excludeMid 用于改名时排除自己 */
+export async function findCategoryBySlug(db: Db, slug: string, excludeMid?: number): Promise<TermRow | null> {
+	return await db.first<TermRow>(
+		`SELECT m.mid, m.name, m.slug, m.type, m.description, m.sort_order, m.count
+		   FROM metas m
+		  WHERE m.type = 'category' AND m.slug = ? AND m.mid != ?
+		  LIMIT 1`,
+		[slug, excludeMid ?? 0],
+	);
+}
+
+export async function createCategory(db: Db, name: string, slug: string, description: string): Promise<number> {
+	const result = await db.run(
+		`INSERT INTO metas (name, slug, type, description, count, sort_order, parent)
+		 VALUES (?, ?, 'category', ?, 0, 0, 0)`,
+		[name, slug, description || null],
+	);
+	return Number(result.meta.last_row_id);
+}
+
+export async function updateCategory(
+	db: Db,
+	mid: number,
+	name: string,
+	slug: string,
+	description: string,
+): Promise<void> {
+	await db.run(`UPDATE metas SET name = ?, slug = ?, description = ? WHERE mid = ? AND type = 'category'`, [
+		name,
+		slug,
+		description || null,
+		mid,
+	]);
+}
+
+/** 删分类：关系表有 ON DELETE CASCADE，但显式删一遍不依赖外键行为 */
+export async function deleteCategory(db: Db, mid: number): Promise<void> {
+	await db.batch([
+		db.prepare('DELETE FROM relationships WHERE mid = ?', [mid]),
+		db.prepare("DELETE FROM metas WHERE mid = ? AND type = 'category'", [mid]),
+	]);
+}

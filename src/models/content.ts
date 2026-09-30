@@ -594,3 +594,42 @@ export async function createAttachment(db: Db, input: AttachmentInput): Promise<
 	);
 	return Number(result.meta.last_row_id);
 }
+
+// ---------------------------------------------------------------------------
+// 分类管理的影响面查询（routes/admin.tsx 用）
+// ---------------------------------------------------------------------------
+
+export interface CategoryPostRow {
+	cid: number;
+	slug: string;
+	status: string;
+	/** 这个分类下的文章，按 mid 升序 —— 与快照一致，categories[0] 就是主分类 */
+	categories: TermRecord[];
+}
+
+/** 挂在某分类下的全部文章（含草稿/隐藏），带各自的全部分类 */
+export async function listPostsInCategory(db: Db, mid: number): Promise<CategoryPostRow[]> {
+	const rows = await db.all<{ cid: number; slug: string; status: string; categories: string | null }>(
+		`SELECT c.cid, c.slug, c.status, ${metaAggregate('category')} AS categories
+		   FROM contents c
+		   JOIN relationships r ON r.cid = c.cid
+		  WHERE r.mid = ? AND c.type = 'post'`,
+		[mid],
+	);
+	return rows.map((row) => ({ cid: row.cid, slug: row.slug, status: row.status, categories: parseTerms(row.categories) }));
+}
+
+/** 批量记录旧地址（§5.1 方案 A）：分类 slug 变更/删除会让一批文章换 URL */
+export async function recordPermalinks(db: Db, entries: { cid: number; key: string }[]): Promise<void> {
+	if (entries.length === 0) return;
+	const now = Math.floor(Date.now() / 1000);
+	await db.batch(
+		entries.map((entry) =>
+			db.prepare('INSERT OR REPLACE INTO permalink_history (cid, permalink, retired_at) VALUES (?, ?, ?)', [
+				entry.cid,
+				entry.key,
+				now,
+			]),
+		),
+	);
+}

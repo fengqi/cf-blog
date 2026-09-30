@@ -763,6 +763,87 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	const mediaAfter = await (await call('/admin/media', { headers: { cookie: cookie2 } })).text();
 	check('媒体库列表显示新附件', mediaAfter.includes('e2e 图片.png') && mediaAfter.includes('data-copy'));
 
+	// 分类管理：创建 / 查重 / slug 变更（URL 走方案 A）/ 删除守卫与主分类顺延
+	lines.push('=== 分类管理 ===');
+	const catPage = await call('/admin/categories', { headers: { cookie: cookie2 } });
+	const catHtml = await catPage.text();
+	check('分类管理页能打开', catPage.status === 200 && catHtml.includes('/admin/categories'));
+
+	const catCreate = await postForm('/admin/categories', { name: '测试分类', slug: 'test-cat', description: '' }, cookie2);
+	check('创建分类返回 303', catCreate.status === 303);
+	const catDup = await postForm('/admin/categories', { name: '另一个', slug: 'test-cat' }, cookie2);
+	check('重复缩略名被拒', catDup.status === 303 && decodeURIComponent(catDup.headers.get('location') ?? '').includes('已被占用'));
+	const catMidRow = await all<{ mid: number }>("SELECT mid FROM metas WHERE type = 'category' AND slug = 'test-cat'");
+	const catMid = catMidRow[0]?.mid;
+
+	const catPostForm = await postForm(
+		'/admin/posts',
+		{
+			title: '分类迁移测试',
+			slug: 'cat-post',
+			type: 'post',
+			status: 'publish',
+			created: '2026-09-30T15:00',
+			body: '正文',
+			excerpt: '',
+			categories: String(catMid),
+			tags: '',
+			allow_feed: '1',
+		},
+		cookie2,
+	);
+	await Promise.allSettled(waits.splice(0));
+	check('分类下的文章已发布', catPostForm.status === 303);
+	check('文章 URL 按 /<分类>/<slug>.html', (await env.BUCKET.get('test-cat/cat-post.html')) !== null);
+	const catPostCidRow = await all<{ cid: number }>("SELECT cid FROM contents WHERE slug = 'cat-post'");
+	const catPostCid = catPostCidRow[0]?.cid;
+
+	const catUpdate = await postForm(`/admin/categories/${catMid}`, { name: '测试分类', slug: 'test-cat-2', description: '' }, cookie2);
+	await runScheduledTasks(env);
+	const catUpdateMsg = decodeURIComponent(catUpdate.headers.get('location') ?? '');
+	check('改分类 slug 返回 303 且提示地址变更', catUpdate.status === 303 && catUpdateMsg.includes('地址已变'), catUpdateMsg);
+	check('文章新地址已写出', (await env.BUCKET.get('test-cat-2/cat-post.html')) !== null);
+	const oldPostObj = await env.BUCKET.get('test-cat/cat-post.html');
+	const oldPostHtml = await oldPostObj?.text() ?? '';
+	check('旧文章地址保留并指向新 canonical', oldPostHtml.includes('test-cat-2/cat-post.html'));
+	check('旧分类归档对象已删除', (await env.BUCKET.get('category/test-cat/')) === null);
+	check('新分类归档对象已生成', (await env.BUCKET.get('category/test-cat-2/')) !== null);
+
+	const catDeleteGuard = await postForm(`/admin/categories/${catMid}/delete`, {}, cookie2);
+	check(
+		'唯一分类的文章会拦住删除',
+		catDeleteGuard.status === 303 && decodeURIComponent(catDeleteGuard.headers.get('location') ?? '').includes('只挂在'),
+	);
+
+	const spareCreate = await postForm('/admin/categories', { name: '备胎分类', slug: 'spare-cat' }, cookie2);
+	check('备胎分类创建成功', spareCreate.status === 303);
+	const spareMidRow = await all<{ mid: number }>("SELECT mid FROM metas WHERE type = 'category' AND slug = 'spare-cat'");
+	// categories 是多值字段：必须 append 两次，塞成一个 "38,39" 会被 Number() 解析成 NaN
+	const catPostUpdateBody = new URLSearchParams({
+		title: '分类迁移测试',
+		slug: 'cat-post',
+		type: 'post',
+		status: 'publish',
+		created: '2026-09-30T15:00',
+		body: '正文',
+		excerpt: '',
+		tags: '',
+		allow_feed: '1',
+	});
+	catPostUpdateBody.append('categories', String(catMid));
+	catPostUpdateBody.append('categories', String(spareMidRow[0]?.mid));
+	const catPostUpdate = await call(`/admin/posts/${catPostCid}`, {
+		method: 'POST',
+		body: catPostUpdateBody,
+		headers: { cookie: cookie2 },
+	});
+	check('给文章挂上第二个分类返回 303', catPostUpdate.status === 303, String(catPostUpdate.status));
+	await Promise.allSettled(waits.splice(0));
+	const catDelete = await postForm(`/admin/categories/${catMid}/delete`, {}, cookie2);
+	await runScheduledTasks(env);
+	check('删除分类返回 303', catDelete.status === 303);
+	check('主分类顺延后新地址已写出', (await env.BUCKET.get('spare-cat/cat-post.html')) !== null);
+
 	// 改口令（⑤）：错误当前口令 / 两次不一致 / 成功后旧会话全失效
 	const wrongCurrent = await postForm(
 		'/admin/password',

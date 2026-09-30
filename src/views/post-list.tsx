@@ -99,33 +99,45 @@ document.addEventListener('DOMContentLoaded', function () {
     var offset = 0;
     var written = 0;
     var failed = [];
-    function step() {
-      fetch('/admin/rebuild/full', {
+    function post(path, params) {
+      return fetch(path, {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ offset: String(offset), limit: '50' }),
+        body: new URLSearchParams(params),
         credentials: 'same-origin',
-      })
-        .then(function (response) { return response.json(); })
-        .then(function (report) {
-          written += report.written;
-          failed = failed.concat(report.failed || []);
-          progress.textContent = '重建中… ' + (report.offset + report.written) + ' / ' + report.total;
-          if (report.nextOffset === null) {
-            progress.textContent = '重建完成：' + written + ' 个对象' +
-              (failed.length > 0 ? '，失败 ' + failed.length + ' 个（可重试）' : '');
-            button.disabled = false;
-          } else {
-            offset = report.nextOffset;
-            step();
-          }
-        })
-        .catch(function (error) {
-          progress.textContent = '重建失败：' + error + '（已处理 ' + written + ' 个，可重试）';
-          button.disabled = false;
-        });
+      }).then(function (response) { return response.json(); });
     }
-    step();
+    // 阶段一：分批重写全站对象（模板/导航/配置变更用）
+    function rebuildFull() {
+      return post('/admin/rebuild/full', { offset: String(offset), limit: '50' }).then(function (report) {
+        written += report.written;
+        failed = failed.concat(report.failed || []);
+        progress.textContent = '重建中… ' + (report.offset + report.written) + ' / ' + report.total;
+        if (report.nextOffset === null) return;
+        offset = report.nextOffset;
+        return rebuildFull();
+      });
+    }
+    // 阶段二：补发「待同步」的内容（地址变更/写失败的对账），直到清零
+    function drainDirty() {
+      return post('/admin/rebuild/batch', { limit: '20' }).then(function (report) {
+        written += report.objects;
+        failed = failed.concat(report.failed || []);
+        progress.textContent = '补发中… 剩余 ' + report.needsSync + ' 篇';
+        if (report.needsSync > 0) return drainDirty();
+      });
+    }
+    rebuildFull()
+      .then(drainDirty)
+      .then(function () {
+        progress.textContent = '完成：' + written + ' 个对象' +
+          (failed.length > 0 ? '，失败 ' + failed.length + ' 个（可重试）' : '');
+        button.disabled = false;
+      })
+      .catch(function (error) {
+        progress.textContent = '失败：' + error + '（可重试）';
+        button.disabled = false;
+      });
   });
 });
 `}</script>

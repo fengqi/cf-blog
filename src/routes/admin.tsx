@@ -9,6 +9,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { createDb } from '../lib/db';
 import { hashPassword, PBKDF2_ITERATIONS, verifyPassword } from '../lib/auth';
+import { categoryKey, pageCount, postKey } from '../lib/url';
 import { parseDateTimeLocal } from '../lib/time';
 import {
 	countNeedsSync,
@@ -19,12 +20,22 @@ import {
 	type ContentInput,
 	listAdminPosts,
 	listAttachments,
+	listPostsInCategory,
 	markAllDirty,
+	markNeedsSync,
 	recordPermalink,
+	recordPermalinks,
 	setContentTerms,
 	updateContentFields,
 } from '../models/content';
-import { ensureTags, listTerms } from '../models/meta';
+import {
+	createCategory,
+	deleteCategory,
+	ensureTags,
+	findCategoryBySlug,
+	listTerms,
+	updateCategory,
+} from '../models/meta';
 import { getOptionValue, getSiteOptions, saveSiteSettings } from '../models/option';
 import { getUserById, updatePassword } from '../models/user';
 import {
@@ -34,9 +45,10 @@ import {
 	putAttachment,
 	sanitizeAttachmentFilename,
 } from '../publish/attachments';
-import { deletePost, publishPost, rebuildTargetsSlice } from '../publish/pipeline';
+import { deleteObjects, deletePost, publishPost, rebuildTargetsSlice } from '../publish/pipeline';
 import { reconcileNeedsSync } from '../publish/sync';
 import { hasUrl, postKeyOf } from '../publish/targets';
+import { CategoriesPage } from '../views/categories';
 import { ChangePasswordPage } from '../views/password';
 import { MediaLibraryPage } from '../views/media';
 import { PostEditorPage } from '../views/post-editor';
@@ -318,6 +330,162 @@ adminRoutes.post('/admin/password', async (c) => {
 		'/admin/login?message=' + encodeURIComponent('口令已修改，请用新口令重新登录'),
 		303,
 	);
+});
+
+adminRoutes.get('/admin/categories', async (c) => {
+	const db = createDb(c.env.DB, 'admin');
+	const categories = await listTerms(db, 'category');
+	return c.html(
+		<CategoriesPage
+			categories={categories}
+			user={c.var.user}
+			message={c.req.query('message')}
+			error={c.req.query('error')}
+		/>,
+	);
+});
+
+/** 分类/标签的 slug 会进 URL：拒掉会破坏路径形状的字符；中文按原样保留（§9 实测可用） */
+function validateTermSlug(slug: string): string | null {
+	if (!slug) return '缩略名不能为空';
+	if (slug.length > 200) return '缩略名太长（>200 字符）';
+	if (/[/%?#]/.test(slug) || /[\x00-\x1f]/.test(slug)) return '缩略名不能包含 / % ? # 或控制字符';
+	return null;
+}
+
+/**
+ * 分类 slug 变更/删除后要清掉的旧归档对象（基础页 + 各分页副本）。
+ * 旧地址不保留 —— 方案 A 只承诺文章 URL，归档直接换新地址。
+ */
+function oldCategoryArchiveKeys(slug: string, publishedCount: number, postsPerPage: number): string[] {
+	const keys = [categoryKey(slug)];
+	for (let page = 1; page <= pageCount(publishedCount, postsPerPage); page++) {
+		keys.push(categoryKey(slug, page));
+	}
+	return keys;
+}
+
+adminRoutes.post('/admin/categories', async (c) => {
+	const db = createDb(c.env.DB, 'admin');
+	const form = await c.req.formData();
+	const text = (name: string) => String(form.get(name) ?? '').trim();
+	const name = text('name');
+	if (!name) {
+		return c.redirect('/admin/categories?error=' + encodeURIComponent('名称不能为空'), 303);
+	}
+	const slug = text('slug') || name;
+	const invalid = validateTermSlug(slug);
+	if (invalid) {
+		return c.redirect('/admin/categories?error=' + encodeURIComponent(invalid), 303);
+	}
+	if (await findCategoryBySlug(db, slug)) {
+		return c.redirect('/admin/categories?error=' + encodeURIComponent(`缩略名 ${slug} 已被占用`), 303);
+	}
+	await createCategory(db, name, slug, text('description'));
+	return c.redirect(
+		'/admin/categories?message=' +
+			encodeURIComponent(`分类「${name}」已创建；归档页在下次发布或全站重渲后出现`),
+		303,
+	);
+});
+
+/**
+ * 保存分类。改 slug 是重操作：主分类是它的文章会整批换 URL（方案 A 保留旧地址），
+ * 改名称/描述也会改到文章页 byline —— 两类影响都通过 needs_sync 交给补发对账收敛。
+ */
+adminRoutes.post('/admin/categories/:mid', async (c) => {
+	const mid = Number(c.req.param('mid'));
+	const db = createDb(c.env.DB, 'admin');
+	const options = await getSiteOptions(c.env);
+	const form = await c.req.formData();
+	const text = (name: string) => String(form.get(name) ?? '').trim();
+
+	const before = (await listTerms(db, 'category')).find((term) => term.mid === mid);
+	if (!before) return c.notFound();
+
+	const name = text('name');
+	if (!name) {
+		return c.redirect('/admin/categories?error=' + encodeURIComponent('名称不能为空'), 303);
+	}
+	const slug = text('slug') || name;
+	const invalid = validateTermSlug(slug);
+	if (invalid) {
+		return c.redirect('/admin/categories?error=' + encodeURIComponent(invalid), 303);
+	}
+	if (slug !== before.slug && (await findCategoryBySlug(db, slug, mid))) {
+		return c.redirect('/admin/categories?error=' + encodeURIComponent(`缩略名 ${slug} 已被占用`), 303);
+	}
+
+	const posts = await listPostsInCategory(db, mid);
+	// 有对象产出的内容才需要补发（草稿发布时会整体重渲）
+	const syncable = posts.filter((post) => post.status === 'publish' || post.status === 'hidden');
+	// 主分类是它的文章：URL 里的分类段变了，记旧地址（方案 A）
+	const moved: { cid: number; key: string }[] = [];
+	if (slug !== before.slug) {
+		for (const post of syncable) {
+			if (post.categories[0]?.mid === mid) {
+				moved.push({ cid: post.cid, key: postKey(before.slug, post.slug) });
+			}
+		}
+	}
+
+	await updateCategory(db, mid, name, slug, text('description'));
+	await recordPermalinks(db, moved);
+	await markNeedsSync(
+		db,
+		syncable.map((post) => post.cid),
+	);
+	if (slug !== before.slug) {
+		await deleteObjects(c.env, oldCategoryArchiveKeys(before.slug, before.count, options.postsPerPage));
+	}
+
+	const urlNote = slug !== before.slug ? `${moved.length} 篇文章地址已变（旧地址保留 canonical），` : '';
+	const message =
+		`分类「${name}」已保存；${urlNote}${syncable.length} 篇引用它的文章已排入重建。` +
+		'点文章列表的「全站重新渲染」一键刷全（或等 Cron）';
+	return c.redirect('/admin/categories?message=' + encodeURIComponent(message), 303);
+});
+
+adminRoutes.post('/admin/categories/:mid/delete', async (c) => {
+	const mid = Number(c.req.param('mid'));
+	const db = createDb(c.env.DB, 'admin');
+	const options = await getSiteOptions(c.env);
+
+	const before = (await listTerms(db, 'category')).find((term) => term.mid === mid);
+	if (!before) return c.notFound();
+
+	const posts = await listPostsInCategory(db, mid);
+	// 守住「文章必须有分类」的底线：只挂这一个分类的文章不能跟着陪葬
+	const orphans = posts.filter((post) => post.categories.length === 1 && post.categories[0]?.mid === mid);
+	if (orphans.length > 0) {
+		return c.redirect(
+			'/admin/categories?error=' +
+				encodeURIComponent(`有 ${orphans.length} 篇文章只挂在「${before.name}」下，先把它们移到别的分类再删`),
+			303,
+		);
+	}
+
+	const syncable = posts.filter((post) => post.status === 'publish' || post.status === 'hidden');
+	// 主分类是它的文章：删除后主分类顺延到下一个（mid 升序），URL 变，记旧地址
+	const moved: { cid: number; key: string }[] = [];
+	for (const post of syncable) {
+		if (post.categories[0]?.mid === mid) {
+			moved.push({ cid: post.cid, key: postKey(before.slug, post.slug) });
+		}
+	}
+
+	await deleteCategory(db, mid);
+	await recordPermalinks(db, moved);
+	await markNeedsSync(
+		db,
+		syncable.map((post) => post.cid),
+	);
+	await deleteObjects(c.env, oldCategoryArchiveKeys(before.slug, before.count, options.postsPerPage));
+
+	const message =
+		`分类「${before.name}」已删除；${moved.length} 篇文章地址已变（旧地址保留 canonical），` +
+		`${syncable.length} 篇引用它的文章已排入重建。点文章列表的「全站重新渲染」一键刷全`;
+	return c.redirect('/admin/categories?message=' + encodeURIComponent(message), 303);
 });
 
 adminRoutes.get('/admin/posts/new', async (c) => {

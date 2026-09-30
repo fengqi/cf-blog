@@ -59,6 +59,7 @@ export function AdminLayout(props: AdminLayoutProps) {
 						<strong>博客后台</strong>
 						<a href="/admin">文章</a>
 						<a href="/admin/posts/new">写文章</a>
+						<a href="/admin/categories">分类</a>
 						<a href="/admin/media">媒体</a>
 						<a href="/admin/settings">设置</a>
 						<a href="/admin/password">口令</a>

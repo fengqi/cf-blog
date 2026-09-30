@@ -120,6 +120,21 @@ async function writeTargets(env: PublishEnv, snapshot: SiteSnapshot, targets: Ta
 }
 
 /**
+ * 直接删一批 R2 对象（后台分类管理用：分类 slug 变更/删除后，旧归档地址不保留）。
+ *
+ * 放在 publish 层是因为「写/删 R2 只允许出现在这里」（§11 纪律 2）；
+ * 调用方（routes/admin.tsx）只负责算出要删哪些 key。
+ */
+export async function deleteObjects(env: PublishEnv, keys: string[]): Promise<number> {
+	if (keys.length === 0) return 0;
+	const outcome = await deleteKeys(env.BUCKET, keys);
+	if (outcome.failed.length > 0) {
+		console.warn(`[publish] 删除旧归档对象失败 ${outcome.failed.length} 个`, outcome.failed.slice(0, 5));
+	}
+	return outcome.written.length;
+}
+
+/**
  * 补渲染：把 `rendered` 为空的内容先渲染出来（§6.4 的 Cron 兜底）。
  *
  * 什么时候会是空的：

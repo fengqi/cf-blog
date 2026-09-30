@@ -106,7 +106,7 @@ npx wrangler dev -c wrangler.e2e.jsonc --port 8788    # 另开一个终端
 curl -s http://127.0.0.1:8788/ | tail -3              # 看到「全部通过」即 OK
 ```
 
-断言集在 `scripts/e2e-runner.ts`（167 项）。`wrangler.e2e.jsonc` 只给本地用，**不要拿它部署**。
+断言集在 `scripts/e2e-runner.ts`（182 项）。`wrangler.e2e.jsonc` 只给本地用，**不要拿它部署**。
 （`wrangler dev` 需要写 `~/.wrangler/registry`，在受限沙箱里跑不起来。）
 
 ## 后台

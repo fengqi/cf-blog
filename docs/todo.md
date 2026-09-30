@@ -99,7 +99,7 @@ npm run rebuild:local                                            # 循环 /__pub
 curl "http://127.0.0.1:8790/__keys"                              # 列对象对账
 
 # 生产全量重建（部署后：这次改动出现在前台 HTML 字节里 → 必跑）
-npm run publish:prod   # 起 --remote 发布会话 → /full 从 0 循环到 null → 指纹自查
+npm run rebuild:prod   # 起 --remote 发布会话 → /full 从 0 循环到 null → 指纹自查
 
 # 附件迁移（按原路径写 R2）
 npx tsx scripts/upload-attachments.ts --root .import --dry-run

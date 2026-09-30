@@ -168,13 +168,13 @@ wrangler secret put TURNSTILE_SECRET
 这次改动**会不会出现在前台 HTML 的字节里**，决定要不要在部署后补一步：
 
 - 改了 `theme/assets/`（CSS/JS）、`theme/` 模板、`src/publish` 渲染逻辑 → **要**：
-  本地跑 `npm run publish:prod`（自动：起 `--remote` 发布会话 → `/full` 从 0 循环到
+  本地跑 `npm run rebuild:prod`（自动：起 `--remote` 发布会话 → `/full` 从 0 循环到
   `nextOffset=null` → 自查主题指纹对象都在桶里，缺了就报错退出）。跳过这步或中途
   只跑一半，就会出现「页面引用的指纹在桶里不存在 → CSS/JS 404」的事故。
 - 只改后台（`src/routes`、`src/views`、`src/models` 等不影响前台输出的）→ 不要，部署即生效。
 - 内容增删改走后台，发布流水线自动增量处理，与 CI 无关。
 
-`publish:prod` 用的是 `wrangler dev --remote`：跑的是**本地工作区这份代码**，所以跑之前
+`rebuild:prod` 用的是 `wrangler dev --remote`：跑的是**本地工作区这份代码**，所以跑之前
 确保工作区就是刚部署上去的内容（干净、最新）。幂等，失败直接重跑。
 
 **两个必须知道的点：**

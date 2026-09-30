@@ -10,7 +10,7 @@
     "bench:render": "tsx scripts/bench-render.ts",
     "hash-password": "tsx scripts/hash-password.ts",
     "deploy": "npx wrangler deploy --minify",
-    "publish:prod": "tsx scripts/publish-full.ts",
+    "rebuild:prod": "tsx scripts/rebuild-prod.ts",
     "deploy:ci": "npm run build:assets && npx wrangler d1 migrations apply blog-db --remote && npm run deploy",
     "cf-typegen": "npx wrangler types --env-interface CloudflareBindings"
   },

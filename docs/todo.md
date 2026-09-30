@@ -49,6 +49,16 @@
 
 ---
 
+## ⚠️ 协作注意（多 agent 同时改这个仓库）
+
+- 2026-09-30：本仓库同时被 **WorkBuddy** 改动过。提交 `2c8c09b` 由我用 `git add -A` 提交，
+  **里面混进了它尚未提交的工作**（主题资源流水线、`overview` 索引页、版式调整、`.workbuddy/memory/`），
+  提交信息没描述这些内容 —— 内容没丢，但归因不准。以后提交前先 `git status` 确认范围。
+- 同一次改动里 `wrangler types` 漏了 `--env-interface CloudflareBindings`，生成的接口名变成 `Env`，
+  导致主分支 typecheck 报 4 个错。已用 `npm run cf-gen`（即 `cf-typegen`）修回。
+  **改绑定后请一律用 `npm run cf-typegen`，别手敲 `wrangler types`。**
+- `.workbuddy/` 是 agent 的私有记忆目录，**建议加进 `.gitignore`**（像 `.idea/` 那样），待确认。
+
 ## 已知取舍与风险（迁移后）
 
 - **62 个 `/attachment/<cid>/` 页面 404** —— 主动豁免（老站这些 URL 是 200）。正文里的图片链接不受影响。

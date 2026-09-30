@@ -52,6 +52,25 @@ npm run deploy       # 手动部署（不碰数据库）
 npm run deploy:ci    # 构建主题资源 + 应用 D1 迁移 + 部署（Workers Builds 用的就是这个）
 ```
 
+**本地开发要先有 `.dev.vars`**（模板 `/.dev.vars.example`，已 gitignore）。`SESSION_SECRET`
+与 `IP_SALT` 缺一个，登录相关路由就会**故意返回 500**（fail-closed）：
+
+```bash
+cp .dev.vars.example .dev.vars              # 首次
+npx wrangler d1 migrations apply blog-db --local
+npm run hash-password -- '本地口令'          # 输出的命令把 --remote 换成 --local 执行
+npm run dev                                 # http://127.0.0.1:8787
+curl "http://127.0.0.1:8787/cdn-cgi/local/scheduled"   # 本地手动触发 Cron
+```
+
+> ⚠️ **别用 `wrangler secret put` 做本地调试 —— 它写的是线上 Worker。** 三者区别：
+>
+> | 场景 | 放哪里 | 影响范围 |
+> |---|---|---|
+> | 本地开发 | 项目根 `.dev.vars`（gitignore） | 只影响本机 `wrangler dev` |
+> | 线上 | `wrangler secret put X` | 直接写线上 Worker，下次请求生效 |
+> | CI 构建期 | 控制台 Build variables | 只在构建时可见，运行时读不到 |
+
 > **主题资源是带指纹的**（`theme/style.<hash>.css`，缓存头 `immutable`）：改了
 > `theme/assets/` 下的文件却不跑 `build:assets`，页面里的 `<link>` 仍指向旧指纹，
 > 样式不会更新。改完资源要 **构建 → 全站重渲**，两步都不能省（design.md §7.2）。
@@ -105,6 +124,8 @@ wrangler secret put SESSION_SECRET   # openssl rand -base64 32
 wrangler secret put IP_SALT
 wrangler secret put TURNSTILE_SECRET
 ```
+
+> 这三条写的是**线上** Worker；本地开发用 `.dev.vars`（见「本地开发」一节），两者互不影响。
 
 ## 部署
 

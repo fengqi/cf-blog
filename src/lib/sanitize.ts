@@ -52,6 +52,9 @@ const whiteList: IWhiteList = {
 	tr: [],
 	th: ['colspan', 'rowspan', 'align'],
 	td: ['colspan', 'rowspan', 'align'],
+	// 存量手写 HTML 的老文章用了 <font color>（30 篇）。它不是 XSS 面，属于历史样式，
+	// 按「保真优先」放行 color；其它属性照旧不认
+	font: ['color'],
 	figure: [],
 	figcaption: [],
 	div: ['class'],

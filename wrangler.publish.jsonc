@@ -1,0 +1,28 @@
+/**
+ * 生产发布专用配置 —— 配合 `wrangler dev --remote` 使用
+ *
+ *   npx wrangler dev -c wrangler.publish.jsonc --remote --port 8788
+ *
+ * 它只有 /health、/full、/keys 三个路由（见 scripts/publish-worker.ts），
+ * **故意不含任何会改动数据的调试路由**。绑定与 wrangler.jsonc 完全一致，
+ * 所以 --remote 时读写的就是线上 D1 与 R2。
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "cf-blog-publish",
+	"main": "scripts/publish-worker.ts",
+	"compatibility_date": "2026-09-26",
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "blog-db",
+			"database_id": "db93b235-4ad8-4391-8e4c-1e9a82473f07"
+		}
+	],
+	"r2_buckets": [
+		{
+			"bucket_name": "blog-content",
+			"binding": "BUCKET"
+		}
+	]
+}

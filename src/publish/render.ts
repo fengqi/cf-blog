@@ -86,6 +86,10 @@ function toListPost(post: PostRecord): ListPost {
  * （`/categories/`、`/tags/`、`/archives/`，见 `renderOverviewPage`）。
  * 好处是导航里不再有任何**随发布而变**的内容 —— 计数只出现在清单页的 HTML 里，
  * 也就是 3 个对象，而不是每个页面一份。
+ *
+ * 独立页面只有 slug=about 的那条兜底约定；其余页面不进导航（发一个页面
+ * 仍然只写 2 个对象：页面自己 + sitemap）。2026-09-30 评估过「顶栏自动列出
+ * 全部页面」，因每次发/删页面都要全站重渲 ~800 个对象而否决，维持现状。
  */
 function toNav(snapshot: SiteSnapshot): NavLink[] {
 	const nav: NavLink[] = [

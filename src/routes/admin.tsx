@@ -85,12 +85,15 @@ async function parseEditorForm(c: Context, timezoneOffset: number): Promise<Edit
 			allowFeed: form.get('allow_feed') === '1' ? 1 : 0,
 			type,
 		},
-		// 独立页面是单段 URL，没有分类
+		// 独立页面是单段 URL：没有分类也没有标签（Typecho 语义），表单里带了也忽略
 		categoryIds: type === 'page' ? [] : form.getAll('categories').map(Number).filter(Number.isFinite),
-		tagNames: text('tags')
-			.split(/[,，]/)
-			.map((name) => name.trim())
-			.filter(Boolean),
+		tagNames:
+			type === 'page'
+				? []
+				: text('tags')
+						.split(/[,，]/)
+						.map((name) => name.trim())
+						.filter(Boolean),
 	};
 }
 

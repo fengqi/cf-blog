@@ -52,7 +52,10 @@ export function PostEditorPage(props: PostEditorPageProps) {
 					<div>
 						<label for="slug">缩略名（URL 片段）</label>
 						<input type="text" id="slug" name="slug" value={post?.slug ?? ''} />
-						<p class="hint">留空则用 cid；改它会让旧链接变成 canonical 页（§5.1 方案 A）</p>
+						<p class="hint">
+							留空则用 cid；改它会让旧链接变成 canonical 页（§5.1 方案 A）；
+							独立页面 slug 为 <code>about</code> 时会出现在前台顶栏「关于」
+						</p>
 					</div>
 					<div>
 						<label for="type">类型</label>
@@ -107,7 +110,8 @@ export function PostEditorPage(props: PostEditorPageProps) {
 					<p class="hint">留空则自动从正文生成（纯文本，落库）</p>
 				</div>
 
-				<div class="row">
+				{/* 独立页面没有分类/标签（Typecho 语义）；选「独立页面」时整块收起，保存端也一并忽略 */}
+				<div class="row" id="terms-row" style={type === 'page' ? 'display:none' : undefined}>
 					<div>
 						<label>分类</label>
 						{props.categories.map((term) => (
@@ -163,6 +167,20 @@ export function PostEditorPage(props: PostEditorPageProps) {
 					</a>
 				</div>
 			</form>
+
+			{/* 类型切到「独立页面」时收起分类/标签（服务端对页面本来就忽略这两样） */}
+			<script>{`
+(function () {
+  var typeSelect = document.getElementById('type');
+  var termsRow = document.getElementById('terms-row');
+  if (!typeSelect || !termsRow) return;
+  function syncTerms() {
+    termsRow.style.display = typeSelect.value === 'page' ? 'none' : '';
+  }
+  typeSelect.addEventListener('change', syncTerms);
+  syncTerms();
+})();
+`}</script>
 		</AdminLayout>
 	);
 }

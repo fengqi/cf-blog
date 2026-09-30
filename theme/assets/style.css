@@ -278,10 +278,12 @@ hr {
 
 /*
  * 容器宽度按页面类型分档（body 上的类，来自 theme/layout.ts 的 `width` 选项）：
- *   .layout-narrow 44rem —— 首页 / 分页 / 归档 / 索引页。这些页面只有列表，
- *                          按 1080px 渲染的话中文摘要一行能塞六十多个字，读起来很累。
- *   .layout-post   62rem —— 文章页。宽度留给「正文 + 右侧目录」两栏，
+ *   .layout-narrow 44rem —— 首页 / 分页 / 归档 / 索引页 / **没有目录的文章与独立页面**。
+ *                          这些页面只有一列，按 1080px 渲染的话中文一行能塞六十多个字，读起来很累。
+ *   .layout-post   62rem —— **有目录**的文章页。宽度留给「正文 + 右侧目录」两栏，
  *                          正文自己再收窄到 42rem（见 `.post-body`）。
+ * 分档看的是**有没有第二列**，不是「文章还是列表」—— 所以 `/about.html` 和没写小标题的
+ * 短文也走 44rem，页头页脚和正文都跟首页对齐（见 `theme/post.ts` 的 `width` 那一段）。
  * 页头 / 页脚跟着一起收 —— 只有正文收窄、页头仍铺满，视觉上会像错位。
  */
 .layout-narrow .container {
@@ -400,7 +402,10 @@ hr {
 	display: grid;
 	gap: 3rem;
 	align-items: start;
-	/* 单列（无目录）时这一列就是正文宽度，整块居中 */
+	/*
+	 * 单列（无目录）。这时 body 上是 `.layout-narrow`，容器内宽 664px < 42rem，
+	 * 所以这一列直接撑满 —— 正文宽度与列表页完全一致。
+	 */
 	grid-template-columns: minmax(0, min(42rem, 100%));
 	justify-content: center;
 }

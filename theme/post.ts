@@ -180,7 +180,15 @@ ${body}
 		title: post.title,
 		canonicalPath: context.canonicalPath || post.url,
 		nav: context.nav,
-		// 文章页固定 62rem：有目录时给两栏留位置，没目录时正文靠 `.post-body` 自己限宽
-		width: 'post',
+		/**
+		 * 版式宽度**跟着内容走，不跟着「是文章还是页面」走**：
+		 *   - 有目录 → 62rem，给 `42rem 正文 + 14rem 右栏` 两列留位置；
+		 *   - 没目录 → 44rem，和首页 / 索引页同一档。
+		 * 这里**必须按 `toc.length` 判断，不能恒给 `post`** —— 独立页面（`/about.html` 等）
+		 * 和没有 h2/h3 的短文章本来就只有一列，恒给 62rem 会让它们顶着一个比首页宽一截的
+		 * 外壳、正文缩在中间：页头和正文都跟其他页对不齐（`.layout-narrow` 的容器内宽 664px
+		 * 正好等于列表页的正文宽度）。
+		 */
+		width: toc.length > 0 ? 'post' : 'narrow',
 	});
 }

@@ -28,7 +28,7 @@
 theme/            前台主题（字符串模板，发布时渲染后写入 R2）
   assets/         CSS / JS 源文件 —— 由 build:assets 打指纹后写入 R2 的 theme/
   assets.ts       资源访问器（路径、<link>、<script> 标签）
-  layout.ts       页面骨架：顶栏导航 + 按页型限宽（narrow 44rem / post 62rem）
+  layout.ts       页面骨架：顶栏导航 + 按页型限宽（narrow 44rem / post 62rem，看有没有目录）
   toc.ts          文章目录：抽 h2/h3、生成锚点 id、写回正文
   overview.ts     索引页 /categories/、/tags/、/archives/
 src/
@@ -106,7 +106,7 @@ npx wrangler dev -c wrangler.e2e.jsonc --port 8788    # 另开一个终端
 curl -s http://127.0.0.1:8788/ | tail -3              # 看到「全部通过」即 OK
 ```
 
-断言集在 `scripts/e2e-runner.ts`（139 项）。`wrangler.e2e.jsonc` 只给本地用，**不要拿它部署**。
+断言集在 `scripts/e2e-runner.ts`（141 项）。`wrangler.e2e.jsonc` 只给本地用，**不要拿它部署**。
 （`wrangler dev` 需要写 `~/.wrangler/registry`，在受限沙箱里跑不起来。）
 
 ## 后台
@@ -205,7 +205,9 @@ wrangler secret put TURNSTILE_SECRET
 挂在文章页上意味着「发一篇文章理论上要让 765 个页面失效」。去掉之后，
 可变数据只活在 3 个索引页对象里，文章页只依赖自己和主题（design.md §5.1 / §11.1）。
 
-- 容器宽度：列表类页面 44rem、文章页 62rem —— 去掉侧栏后按 1080px 排，中文一行能塞六十多个字
+- 容器宽度**按「有没有第二列」分档，不按「文章还是列表」**（`theme/post.ts` 的 `width`）：
+  有目录的文章 62rem，其余（列表页 / 分页 / 索引页 / 独立页面 / 没写 h2-h3 的短文）一律 44rem。
+  `/about.html` 曾经跟着文章页顶 62rem 的外壳，正文缩在中间、页头比首页宽一截 —— 已修。
 - 文章目录在**服务端**抽取（`theme/toc.ts`），宽屏右栏 sticky、窄屏正文顶部 `<details>`，
   两份静态 HTML 由 CSS 按 62rem 二选一，**零 JS**；滚动高亮是 `app.js` 的纯增量增强
 - 「关于」链到独立页面 `about`（`render.ts` 的 `ABOUT_SLUG`）；站点里没有这个 slug 时整条不渲染

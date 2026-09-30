@@ -28,8 +28,12 @@
   不做下拉；清单落在 `/categories/`、`/tags/`、`/archives/`（新增 URL）。
   动机是一致性：侧栏里的计数/最新文章是**全局可变数据**，挂在文章页上会让「发一篇」理论上失效 765 个页面。
   `theme/components/sidebar.ts` 已删除。
-- **容器宽度分档**（`layout.ts` 的 `width` → body 类）：`.layout-narrow` 44rem（列表类页面）、
-  `.layout-post` 62rem（文章页）。去掉侧栏后按 1080px 排，中文一行能塞六十多个字。
+- **容器宽度分档看「有没有第二列」，不看页型**（`layout.ts` 的 `width` → body 类，
+  由 `theme/post.ts` 按 `toc.length` 决定）：`.layout-post` 62rem（**有目录**的文章）、
+  其余一律 `.layout-narrow` 44rem（列表页 / 分页 / 索引页 / **独立页面 / 没写 h2-h3 的短文**）。
+  44rem 的容器内宽 664px 正好等于列表页正文宽度，所以 `/about.html` 的正文左边缘和首页列表重合。
+  ⚠️ 曾经在 `post.ts` 里**恒给 `width: 'post'`**，`/about.html` 因此顶着 62rem 外壳（正文缩中间、
+  页头宽 288px），被风息看出来 —— 改版新增版式时先想清楚「这一页有几列」。
 - **文章目录在服务端生成**（`theme/toc.ts`）：渲染时抽 h2/h3、生成锚点 id 并写回正文。
   HTML 里故意出现两份（宽屏 `<aside>` + 窄屏 `<details>`），CSS 按 62rem 二选一 ——
   `<details>` 的展开由 `open` 属性控制，CSS 盖不住，所以不合并。滚动高亮在 `app.js`。
@@ -52,18 +56,32 @@
 npm run typecheck && npm run build:assets
 npx wrangler d1 migrations apply blog-db --local
 npx wrangler dev -c wrangler.e2e.jsonc --port 8788   # 另开终端
-curl -s http://127.0.0.1:8788/ | tail -3             # 「全部通过」= 139 项
+curl -s http://127.0.0.1:8788/ | tail -12            # 「=== 结果：全部通过 ===」= 141 项
 ```
+
+⚠️ **汇总行不在末尾**：报告最后还会附 `---FEED---` 和 `---SITEMAP---` 两段 XML，`tail` 只会看到
+`</urlset>`。要判成败就 `grep '=== 结果'`，或者数 `✓` / `✗`（当前基线：141 ✓ / 0 ✗）。
+HTTP 状态也是信号：有失败时 worker 返回 500。
 
 生产（**会改线上**）：
 
 ```bash
+npm run build:assets                                  # 必需：改了 theme/assets/ 之后
 npx wrangler dev -c wrangler.publish.jsonc --remote --port 8799
 # 循环 GET /full?offset=N&limit=50 到 nextOffset=null；GET /keys 对账
 ```
 
+- ⚠️ **`/full` 必须从 `offset=0` 跑完整轮。** 只跑中间几批会同时造成两个线上事故
+  （2026-09-30 实际发生过）：
+  1. **资源目标排在 index 0**，跳过第 0 批 → 新渲出来的页面引用一个从未上传的指纹 →
+     页面**完全无样式无 JS**；
+  2. 跑一半 → 线上**新旧主题混着**（列表页新、文章页旧）。
+  自查方法：`curl -sI https://blog.fengqi.me/<页面>` 比 `last-modified` 是否同批；
+  `curl -s https://blog.fengqi.me/ | grep -oE 'theme/[^"]+'` 拿到的指纹，
+  必须能在桶里取到 200（用 `preview:r2 --remote` 的 `/__keys` 对）。
 - 注意：`--remote` 跑的是**上传上去的那份代码**，改了代码/资源必须重启 dev 进程再重渲。
-- 线上基线：**803 个渲染对象**（2026-09-30 改版后，比之前 +3 个索引页）+ 67 个附件（另有迭代留下的旧指纹 CSS）。
+- 线上基线：**805 个渲染对象**（2026-09-30 改版后）+ 67 个附件；另有迭代留下的旧指纹 CSS
+  （`theme/` 下同时存在 4 个对象是正常的，见 ⑭）。
 
 ## 无头浏览器视觉验收（本机可用）
 
@@ -83,12 +101,27 @@ const browser = await chromium.launch({ executablePath: '/Applications/Google Ch
 只会按脚本所在目录往上找 `node_modules`，放 `/tmp` 必然报
 `ERR_MODULE_NOT_FOUND: Cannot find package 'playwright-core'`。
 
-**`nohup python3 -m http.server &` 起在 Bash 工具里的服务会随工具调用结束被连带杀掉**
-（`curl` 当场 200，下一次工具调用就 `ERR_CONNECTION_REFUSED`）。
-静态验收服务用工具的 `run_in_background: true` 起，`TaskStop` 关。
-**端口别再用 8799** —— 那是生产 `wrangler dev --remote` 的口，本地静态预览换个号。
-查端口用 `lsof -nP -iTCP:<端口> -sTCP:LISTEN`：沙箱里 `ps` 被禁（`operation not permitted`），
-而 `curl` 打关闭端口可能返回 **502** 而不是拒连，**不能用 curl 判断本机端口死活**。
+**本地预览一律走 `npm run preview:r2`**（http://127.0.0.1:8790，风息 17:10 收进仓库的
+`scripts/preview-worker.ts` + `wrangler.preview.jsonc`）：它按真实 R2 规则把路径映射成 key 取对象，
+`/theme/style.<hash>.css`、附件、相对链接全都能正常加载，比导到 `/tmp` 再起 `http.server` 干净得多。
+
+```bash
+npm run preview:r2                                               # 预览本地 R2（8790）
+npx wrangler dev -c wrangler.preview.jsonc --remote --port 8791  # 只读线上桶（换个口，别抢 8790）
+curl "http://127.0.0.1:8790/__keys"                              # 列对象对账
+curl "http://127.0.0.1:8790/__publish?confirm=local&limit=200"   # 重渲本地 R2（跑完 e2e 后要这个）
+```
+
+- ⛔ **`--remote` 模式下绝对不要碰 `/__publish`** —— 那时绑定指向线上桶，会写生产。
+- 它和 `wrangler.e2e.jsonc` **共用同一个本地 R2**（`.wrangler/state/v3/r2`），所以 e2e 跑完
+  预览看到的是 fixture 终态。注意 **e2e 末尾有 `deletePost`，会删掉 fixture 里带 h2/h3 的那篇** ——
+  跑完 e2e 后本地预览里没有「有目录的文章」了，要验目录版式得先 `/__publish` 另想别的样本。
+- **别再用我原先那套**（`wrangler r2 object get` 导到 `/tmp/cfsite` + `python3 -m http.server`）：
+  `/tmp` 重启会清、导出还要一次只导 2~3 个 key（`npx wrangler` 一次导多个会被 SIGKILL）。
+- 端口：生产 `--remote` 用 8799，`preview:r2` 用 8790，e2e 用 8788。**起之前先
+  `lsof -nP -iTCP:<口> -sTCP:LISTEN` 看占没占**（风息的预览实例可能正跑着）。
+  沙箱里 `ps` 被禁（`operation not permitted`）；`curl` 打关闭端口可能返回 **502** 而不是拒连，
+  **不能用 curl 判断本机端口死活**。
 
 **必须量数字，不能只截图。** 2026-09-30 又栽了一次：`.post-body` 上写了 `max-width: 42rem;
 margin-inline: auto;` —— CSS Grid 里 grid item 带 `auto` 外边距会放弃 stretch、退化成「内容宽度」，
@@ -97,15 +130,14 @@ margin-inline: auto;` —— CSS Grid 里 grid item 带 `auto` 外边距会放�
 
 ### 本地验收怎么把 R2 对象拿出来看
 
-`wrangler dev -c wrangler.e2e.jsonc` 跑出来的对象存在 `.wrangler/state/v3/r2/`，用
-`node_modules/.bin/wrangler r2 object get blog-content/<key> --local --file=...` 导出
-（空 key 的首页写成 `"blog-content/"`）。导完把 `theme/<指纹文件名>` 一起落盘，
-用 `python3 -m http.server` 起个静态服务，就能让 Chrome 打开真实渲染结果。
-**别用 `npx wrangler`，一次导出多个 key 时会被杀（试过，跑到第 5 个就 SIGKILL）** ——
-用 `node_modules/.bin/wrangler` 并且一次只导 2~3 个。
+用 `preview:r2` 的 `/__keys`（见上）列对象、直接按路径 curl/Chrome 打开即可，
+**不用再手动导出**。只有在要看线上桶时才用 `--remote` 模式。
 
 ## 环境坑
 
-- 本会话的 `grep` 对多字节模式不可靠（`grep -c '✓'` 正常，`grep "中文\|x"` 会返回空），
-  验证脚本尽量用 Node 写，别堆 shell 管道。
+- **Bash 工具的 `grep` 对多字节 / 多模式几乎不可靠**（2026-09-30 又栽了一次：
+  `grep -n "layout-post\|about"` 在 `scripts/e2e-runner.ts` 上返回空，换成内置的
+  Grep 工具立刻找到 5 处）。**查代码一律用 Grep 工具，不要用 bash `grep`/`rg`。**
 - `wrangler dev` 偶发 esbuild `The service is no longer running` 启动失败，重试即可。
+- 端口被占时 `wrangler dev` 会抛 `Fatal uncaught kj::Exception: bind(): Address already in use`，
+  报错栈很难看但意思就是端口占用 —— 换口。

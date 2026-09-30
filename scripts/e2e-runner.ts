@@ -276,6 +276,11 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('hidden 不进 feed', !earlyFeed.includes('隐藏文章标题'));
 	const hiddenHtml = (await (await env.BUCKET.get('default/hidden-one.html'))?.text()) ?? '';
 	check('hidden 页面正文正常渲染', hiddenHtml.includes('隐藏正文'));
+	// 宽度分档看「有没有第二列」，不看「文章还是列表」：这篇只有 h1，没有 h2/h3 → 无目录 → 44rem
+	check(
+		'没有 h2/h3 的短文章走列表页那档宽度（`.layout-narrow`）',
+		hiddenHtml.includes('<body class="layout-narrow">') && !hiddenHtml.includes('<body class="layout-post">'),
+	);
 
 	// 注意：R2 的 list() 不返回 httpMetadata（和 S3 一致），要看缓存头必须 head/get
 	const homeMeta = (await env.BUCKET.head(''))?.httpMetadata;
@@ -488,6 +493,11 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check(
 		'没有 h2/h3 的页面不渲染目录',
 		!pageHtml.includes('<aside class="post-toc"') && !pageHtml.includes('post-toc-inline'),
+	);
+	// 同一条规则的另一半：没有目录就不该撑 62rem 的宽外壳，否则页头/正文都跟首页对不齐
+	check(
+		'独立页面走列表页那档宽度（`.layout-narrow`）',
+		pageHtml.includes('<body class="layout-narrow">') && !pageHtml.includes('<body class="layout-post">'),
 	);
 
 	// -----------------------------------------------------------------------

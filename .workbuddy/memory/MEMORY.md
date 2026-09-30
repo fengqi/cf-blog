@@ -83,6 +83,38 @@ npx wrangler dev -c wrangler.publish.jsonc --remote --port 8799
 - 线上基线：**805 个渲染对象**（2026-09-30 改版后）+ 67 个附件；另有迭代留下的旧指纹 CSS
   （`theme/` 下同时存在 4 个对象是正常的，见 ⑭）。
 
+## 本地环境：e2e fixture ↔ 真实内容（`.import/`）
+
+本地 D1/R2 平时装的是 **e2e fixture**（14 contents / 4 metas / 33 个对象）。跑一次 e2e 就会
+把它重建成那个样子 —— 所以「本地预览全是假文章」是常态，不是坏了。想看真实内容要把
+`.import/` 导进来，**六步，顺序不能乱**：
+
+```bash
+# ⚠️ 第 0 步最重要：先把所有 wrangler dev 停掉（preview:r2 / e2e 都算）
+# 1) 备份 .wrangler/state/v3/{d1,r2}
+# 2) 清 fixture，**保留 users**（管理员 PBKDF2 口令不能丢）
+#    逐条 DELETE，别塞进一个 --command
+# 3) tsx scripts/import-typecho.ts --db .import/TnJehpNtTuc.db --apply local   （约 4 分钟，后台跑）
+# 4) 启 e2e worker，循环 GET /full?offset=N&limit=50 到 nextOffset=null    （803 对象，约 40 秒）
+# 5) 补附件：**并发**跑 wrangler r2 object put，只传缺的（串行版要 25 分钟，见下）
+```
+
+三条硬规则：
+
+1. ⛔ **`wrangler dev` 运行期间，外面用 `wrangler d1 execute --local` 改本地库会被冲掉。**
+   实测：`DELETE FROM metas` 后连查三次都是 0，紧接着脚本自己读目标库却读到 3 行 —— 它因此走了
+   「复用已有 mid」的分支。**动本地 D1 前必须停掉所有 dev 进程。**
+2. **`import-typecho.ts` 只写 D1，不碰 R2。** 导完必须重渲（第 4 步），否则预览还是旧内容 ——
+   这是风息说「import 不管用」的主因。
+3. **导出/上传一律「只处理缺的」**：拿 `preview:r2` 的 `/__keys` 和线上清单（或 `--remote` 的
+   `/__keys`）做差集。`upload-attachments.ts` 串行 spawn wrangler，67 个文件要 **25 分钟以上**，
+   而且会重传已有的；并发 6 只补缺的，31 个文件约 9 分钟。
+
+**真实内容导完后的验收数字**（应与线上一致）：contents 227（111 posts / 5 pages / 62 attachments）、
+metas 281（7 分类 + 274 标签）、relationships 529、permalink_history 2、users 1、R2 **803** 个对象。
+本地与线上逐 key 比，**只应差 theme 指纹**（本地是新构建）。附件的 content-type 要抽查
+（`image/png` / `image/jpeg`）。
+
 ## 无头浏览器视觉验收（本机可用）
 
 `playwright-core` 装在托管工作区（不在项目 node_modules），浏览器直接用系统 Chrome：

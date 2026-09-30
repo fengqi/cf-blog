@@ -93,7 +93,7 @@ export function CategoriesPage(props: CategoriesPageProps) {
 									<button form={`edit-${term.mid}`} type="submit">
 										保存
 									</button>
-									<button form={`delete-${term.mid}`} type="submit">
+									<button form={`delete-${term.mid}`} class="danger" type="submit">
 										删除
 									</button>
 								</div>

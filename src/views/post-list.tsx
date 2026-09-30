@@ -77,7 +77,7 @@ export function PostListPage(props: PostListPageProps) {
 										预览
 									</a>
 									<form method="post" action={`/admin/posts/${post.cid}/delete`}>
-										<button type="submit">删除</button>
+										<button class="danger" type="submit">删除</button>
 									</form>
 								</div>
 							</td>

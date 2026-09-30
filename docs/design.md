@@ -916,8 +916,10 @@ cf-blog/
 │   ├── import-typecho.ts          # Typecho 迁移（含全量渲染 + 写入 R2）
 │   ├── hash-password.ts           # 生成 PBKDF2 串
 │   ├── bench-render.ts            # 渲染压测（§13.1 #4）：npm run bench:render
-│   ├── e2e-runner.ts              # 本地端到端断言集（68 项）
-│   └── e2e-worker.ts              # e2e 的 Worker 入口，只在 wrangler.e2e.jsonc 里跑
+│   ├── e2e-runner.ts              # 本地端到端断言集（104 项）
+│   ├── e2e-worker.ts              # e2e 的 Worker 入口，只在 wrangler.e2e.jsonc 里跑
+│   ├── upload-attachments.ts      # 附件迁移：按原路径把 usr/uploads 写进 R2
+│   └── publish-worker.ts          # 生产发布专用（只有 /full、/keys），配 wrangler.publish.jsonc
 ├── wrangler.e2e.jsonc             # 本地 e2e 专用配置（**不要拿它部署**）
 └── docs/
     ├── design.md                  # 本文档
@@ -1248,6 +1250,27 @@ Typecho 很可能对两个候选都返回 200（文章同时属于两个分类�
 **附件文件**：`contents` 里 `type='attachment'` 的元信息照搬（`mime`/`size`/`r2_key`），
 文件本体要单独搬 —— R2 key 必须与老站路径逐字一致（`usr/uploads/…`，含中文与空格，
 实测编码可用，见 §9），且**附件行不进内容流水线的待办**（它的 `needs_sync` 是给文件上传看的）。
+
+### 迁移执行结果（2026-09-30，已上线 blog.fengqi.me）
+
+对着真实库跑了全流程，结果如下：
+
+| 步骤 | 结果 |
+|---|---|
+| 导入 D1 | **227 contents**（111 publish + 36 hidden + 13 draft + 62 attachment + 5 page）/ **281 metas**（7 分类 + 274 标签，3 对同名 slug 合并）/ **529 relationships** / 1 用户（与现有 admin 合并，**口令与 token_version 未被覆盖**） |
+| 全量发布 | **798 个对象**，16 批 × 50 写完，**0 失败** |
+| 附件 | **67 个文件 / 10.9 MB** 按原路径写入 R2（key 与老站逐字一致，`immutable`） |
+| **URL 对账** | 老站 556 条清单 → 新站：**494 条 200 + 62 条 404（全部是选定豁免的附件页）**，**0 条意外失败** |
+| 保真抽查 | 手写 HTML 老文章 / markdown 近期文章 / hidden 文章 / 独立页面，逐句比对老站页面全部命中 |
+| 净收益 | 老站上 500 的 `/memos.html`、`/pocket.html` 在新站正常渲染；`/feed/` 从 500 变 200；补上了老站没有的 `/sitemap.xml` |
+
+已知取舍：
+
+- **62 个 `/attachment/<cid>/` 页面 404**（人拍板豁免）。正文里的图片链接不受影响。
+- **2 张图在迁移前就丢了**：`/usr/uploads/2012/02/135359723.png`、`/usr/uploads/2013/02/1324381562.png`
+  在老站和本地 `usr/uploads` 里都不存在（其中一张还被正文引用着）—— 属于既成事实，不是迁移造成的。
+- 作者 byline 链到 `https://fengqi.me`（老站用户资料里的 url 字段）。要改就改 `users.url`。
+- **主题还没有 CSS**：页面结构/内容/URL 都对，但外观是朴素 HTML（下一步做主题资源流水线，§7.2）。
 
 ### 迁移中的坑
 

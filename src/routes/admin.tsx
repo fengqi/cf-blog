@@ -24,6 +24,7 @@ import {
 import { ensureTags, listTerms } from '../models/meta';
 import { getSiteOptions } from '../models/option';
 import { deletePost, publishPost } from '../publish/pipeline';
+import { reconcileNeedsSync } from '../publish/sync';
 import { hasUrl, postKeyOf } from '../publish/targets';
 import { PostEditorPage } from '../views/post-editor';
 import { PostListPage } from '../views/post-list';
@@ -253,4 +254,26 @@ adminRoutes.post('/admin/rebuild', async (c) => {
 	const marked = await markAllDirty(db);
 	const message = `已把 ${marked} 篇内容排入重建队列；Cron 每小时处理 20 篇（§6.5）`;
 	return c.redirect('/admin?message=' + encodeURIComponent(message), 303);
+});
+
+/**
+ * 分批重建（§6.5）：把「待同步」的内容**立刻**处理掉一批，而不是等每小时 Cron。
+ *
+ * 存在的意义：迁移（120 篇 + 全部分页/归档一次要写几百个对象）和改了模板之后的全站重渲，
+ * 都不适合放在一次请求里 —— CPU 与墙钟会撞上限。于是拆成小批，由脚本循环调用：
+ *
+ *   while (needsSync > 0) POST /admin/rebuild/batch { limit: 20 }
+ *
+ * 返回 JSON，方便脚本判断进度。
+ */
+adminRoutes.post('/admin/rebuild/batch', async (c) => {
+	const form = await c.req.formData().catch(() => null);
+	const limit = Number.parseInt(String(form?.get('limit') ?? c.req.query('limit') ?? '20'), 10);
+	const report = await reconcileNeedsSync(c.env, Number.isFinite(limit) && limit > 0 ? limit : 20);
+	return c.json({
+		rebuilt: report.rebuilt.length,
+		objects: report.objects,
+		failed: report.failed,
+		needsSync: report.needsSync,
+	});
 });

@@ -1159,16 +1159,65 @@ npx tsx scripts/import-typecho.ts --full-publish
 
 ### 数据迁移步骤
 
-1. 导出 MySQL 数据（`mysqldump`）
+1. **拿到老站的 SQLite 数据库文件**（线上是 Typecho + SQLite，不是 MySQL）——
+   直接拷一份 `typecho.db` 即可，不需要 `mysqldump`
 2. `scripts/import-typecho.ts` 做转换：
    - 表名与字段按 §4.1 映射
    - `typecho_contents.text` → 新 `body`，并调用 markdown 渲染填充 `rendered`
    - `typecho_contents.type` 的 `post_draft` / `page_draft` 拆成 `type` + `status='draft'`
    - `typecho_metas.count` 需要重算
    - **`type='attachment'` 的记录**：这些是附件，`text` 字段存的是 JSON 元信息。已确认仅约 **10 条**（不是 cid 差值的大头，大头是草稿）。全量导入即可，不值得做筛选逻辑
-   - `typecho_users.password` 是 `$P$` 开头的 phpass 哈希，**在 Workers 里无法校验**，存量用户只能重置密码。个人博客通常只有 1 个管理员账号，直接重设即可
+   - `typecho_users.password` 是 `$P$` 开头的 phpass 哈希，**在 Workers 里无法校验**，存量用户只能重置密码。
+     ⚠️ **导入用户时不要覆盖现有 admin 的口令与 `token_version`** ——
+     新库里的口令是刚 bootstrap 好的 PBKDF2 串，被 phpass 覆盖就再也登不进去了
 3. **附件搬迁**：`usr/uploads/` 整目录同步到 R2，路径保持原样（详见 §9）
 4. 用 `wrangler d1 execute --file` 批量导入（单文件 ≤ 5GB）
+
+### 迁移实现记录（2026-09）
+
+脚本：`scripts/import-typecho.ts`，四步走，**前三步都不动线上**：
+
+```bash
+# ① 只读体检：行数分布、异常清单、多分类双候选 URL、图片引用盘点
+npx tsx scripts/import-typecho.ts --db .import/typecho.db
+# ② 逐条核对老站（设计文档要求的「URL 逐条核对」，因为没有 sitemap）
+npx tsx scripts/import-typecho.ts --db .import/typecho.db --verify-urls
+# ③ 生成 SQL + 写入**本地** D1（彩排）
+npx tsx scripts/import-typecho.ts --db .import/typecho.db --apply local
+# ④ 生产导入（这一步才动线上）
+npx tsx scripts/import-typecho.ts --db .import/typecho.db --apply remote
+```
+
+导入完成后，全量发布会写几百个对象，**不能放在一次请求里**（CPU/墙钟），
+所以走分批入口（§6.5）：
+
+```
+POST /admin/rebuild/batch { limit: 20 }   # 返回 JSON：{rebuilt, objects, failed, needsSync}
+# 循环调用直到 needsSync = 0
+```
+
+**必须先读目标库、按业务键复用 id**（本地彩排摔出来的）：
+
+- `metas` 除 `mid` 外还有 `(type, slug)` 唯一索引 → 老站的「安卓」标签可能与新库已有行同名不同 mid，
+  盲插会直接撞唯一约束。做法：按 `(type, slug)` 复用已有 mid，再把 `relationships` 一起重映射。
+- `users` 的 `username` 是唯一索引，而**新库管理员叫 `admin`、老站作者叫 `fengqi`**：
+  按用户名匹配会凭空多出一个拿不到口令的「幽灵管理员」，而文章 byline 还得靠它撑。
+  做法：**单管理员场景直接把老站作者合并到现有管理员**（只更新 `screen_name`/`url`/`mail`）。
+- 红线：**绝不覆盖现成管理员的 `password` 与 `token_version`** —— 那是刚 bootstrap 好的 PBKDF2 串，
+  被 phpass 覆盖就再也登不进去（本地彩排专门设了一个已知哈希来验证这条）。
+
+**已知保真风险：多分类文章的「第一个分类」口径**
+
+Typecho 的 permalink 取「第一个分类」，那个「第一」是 `typecho_relationships` 的**插入顺序**；
+而 `primaryCategory()` 按 `metas.mid` **升序**取。两者不一致时 URL 就变了。
+脚本会把两种候选 URL 都算出来并标记差异，再用 `--verify-urls` 爬老站判定线上到底服务哪个。
+Typecho 很可能对两个候选都返回 200（文章同时属于两个分类），那时需要人拍板选一个；
+若与我们的口径不同，两条修法：给 `relationships` 加排序列（新增一次迁移），
+或把老 URL 记进 `permalink_history` 走 §5.1 方案 A。
+
+**附件文件**：`contents` 里 `type='attachment'` 的元信息照搬（`mime`/`size`/`r2_key`），
+文件本体要单独搬 —— R2 key 必须与老站路径逐字一致（`usr/uploads/…`，含中文与空格，
+实测编码可用，见 §9），且**附件行不进内容流水线的待办**（它的 `needs_sync` 是给文件上传看的）。
 
 ### 迁移中的坑
 

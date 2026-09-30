@@ -515,10 +515,18 @@ export async function publishWaitingPosts(db: Db, now: number): Promise<number> 
 	return result.meta.changes ?? 0;
 }
 
-/** 后台首页显示「待同步」数量（§6.2 第 5 条：让作者看见异常，而不是靠运气发现） */
+/**
+ * 后台首页显示「待同步」数量（§6.2 第 5 条：让作者看见异常，而不是靠运气发现）。
+ *
+ * ⚠️ 过滤条件必须和 `listNeedsSyncCids` **完全一致**（`type IN ('post','page')`），
+ * 否则计数会永远停在一个对账轮次根本处理不到的行上 —— 附件就是这样：
+ * 它的 `needs_sync` 是给「文件上传」那一步看的，不该出现在内容流水线的待办里。
+ * （本地彩排里就卡在 `needsSync: 1` 上，查了半天。）
+ */
 export async function countNeedsSync(db: Db): Promise<number> {
 	const row = await db.first<{ count: number }>(
-		`SELECT COUNT(*) AS count FROM contents WHERE needs_sync = 1 AND status = 'publish'`,
+		`SELECT COUNT(*) AS count FROM contents
+		  WHERE needs_sync = 1 AND type IN ('post','page') AND status = 'publish'`,
 	);
 	return row?.count ?? 0;
 }

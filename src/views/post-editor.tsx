@@ -107,7 +107,10 @@ export function PostEditorPage(props: PostEditorPageProps) {
 					<textarea id="excerpt" name="excerpt" rows={3}>
 						{post?.excerpt ?? ''}
 					</textarea>
-					<p class="hint">留空则自动从正文生成（纯文本，落库）</p>
+					<p class="hint">
+						留空则自动从正文生成（纯文本，落库）；也可以在正文里写{' '}
+						<code>&lt;!--more--&gt;</code>，标记前的部分会作为摘要（Typecho 惯例）
+					</p>
 				</div>
 
 				{/* 独立页面没有分类/标签（Typecho 语义）；选「独立页面」时整块收起，保存端也一并忽略 */}

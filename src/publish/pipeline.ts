@@ -20,7 +20,7 @@
  */
 
 import { createDb } from '../lib/db';
-import { countWords, extractText, makeExcerpt, renderMarkdown } from '../lib/markdown';
+import { countWords, extractText, makeExcerpt, renderMarkdown, splitMoreMarker } from '../lib/markdown';
 import { deleteKeys, writeObjects } from '../lib/r2';
 import type { WriteOutcome } from '../lib/r2';
 import { standalonePagePath, postPath } from '../lib/url';
@@ -86,10 +86,16 @@ export async function renderAndSaveBody(
 	const source = await getContentBody(db, cid);
 	if (!source) throw new Error(`cid=${cid} 不存在`);
 
-	const rendered = renderMarkdown(source.body);
+	// `<!--more-->` 摘要分界（Typecho 惯例）：标记前的部分作摘要，标记本身不进正文
+	const { body, beforeMore } = splitMoreMarker(source.body);
+	const rendered = renderMarkdown(body);
 	const text = extractText(rendered);
+	// 摘要优先级：作者自定义 > `<!--more-->` 前半段 > 自动截前 200 字。
 	// 作者填了自定义摘要就尊重它；否则把自动摘要**落库** —— 这样列表查询不必回捞 rendered
-	const excerpt = (source.excerpt ?? '').trim() || makeExcerpt(rendered);
+	const excerpt =
+		(source.excerpt ?? '').trim() ||
+		(beforeMore !== null ? makeExcerpt(renderMarkdown(beforeMore)) : '') ||
+		makeExcerpt(rendered);
 	const words = countWords(text);
 
 	await saveRendered(db, cid, { rendered, excerpt, words });

@@ -31,6 +31,22 @@ export function sanitizeRendered(html: string): string {
 	return sanitizeHtml(html);
 }
 
+/**
+ * Typecho 惯例的摘要分界标记（`<!--more-->`，兼容大小写与空格）。
+ *
+ * 与迁移导入（scripts/import-typecho.ts）同一套语义：标记前的部分作摘要，
+ * 标记本身不进正文。
+ */
+const MORE_MARKER = /<!--\s*more\s*-->/i;
+
+/** 拆摘要分界：正文去掉标记；标记前有内容时返回它（作摘要来源） */
+export function splitMoreMarker(body: string): { body: string; beforeMore: string | null } {
+	const index = body.search(MORE_MARKER);
+	if (index < 0) return { body, beforeMore: null };
+	const before = body.slice(0, index).trim();
+	return { body: body.replace(MORE_MARKER, ''), beforeMore: before || null };
+}
+
 const ENTITIES: Record<string, string> = {
 	'&amp;': '&',
 	'&lt;': '<',

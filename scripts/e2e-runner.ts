@@ -844,6 +844,38 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('删除分类返回 303', catDelete.status === 303);
 	check('主分类顺延后新地址已写出', (await env.BUCKET.get('spare-cat/cat-post.html')) !== null);
 
+	// `<!--more-->` 摘要分界（Typecho 惯例）：标记前半段落为摘要，标记不进正文
+	const moreForm = await postForm(
+		'/admin/posts',
+		{
+			title: '摘要分界测试',
+			slug: 'more-marker',
+			type: 'post',
+			status: 'publish',
+			created: '2026-09-30T16:00',
+			body: '这是标记前的摘要部分。<!--more-->这是标记后的正文。',
+			excerpt: '',
+			allow_feed: '1',
+		},
+		cookie2,
+	);
+	await Promise.allSettled(waits.splice(0));
+	const moreRow = await all<{ excerpt: string; rendered: string }>(
+		"SELECT excerpt, rendered FROM contents WHERE slug = 'more-marker'",
+	);
+	check(
+		'`<!--more-->` 前半段落为摘要',
+		moreForm.status === 303 && moreRow[0]?.excerpt === '这是标记前的摘要部分。',
+		moreRow[0]?.excerpt,
+	);
+	check(
+		'摘要标记不进正文渲染',
+		!(moreRow[0]?.rendered ?? '').includes('<!--more-->') && (moreRow[0]?.rendered ?? '').includes('标记后的正文'),
+	);
+	const moreObj = await env.BUCKET.get('default/more-marker.html');
+	const moreHtml = await moreObj?.text() ?? '';
+	check('文章页用 more 标记前的摘要', moreHtml.includes('这是标记前的摘要部分。'));
+
 	// 改口令（⑤）：错误当前口令 / 两次不一致 / 成功后旧会话全失效
 	const wrongCurrent = await postForm(
 		'/admin/password',

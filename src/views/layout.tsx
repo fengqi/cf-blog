@@ -1,7 +1,12 @@
 /**
  * 后台骨架 —— 设计文档 §11 / §0（后台无单独构建链，样式内联）
  *
- * 只 import `hono/jsx`（§11 纪律 1）；`dangerouslySetInnerHTML` 在这个文件里不出现。
+ * 只 import `hono/jsx`（§11 纪律 1）。
+ * ⚠️ STYLE 必须走 dangerouslySetInnerHTML：Hono JSX 会把字符串子节点转义，
+ * 而 <style> 是 raw text 元素、浏览器不还原实体 —— 转义后的 &quot; 会让
+ * font-family 声明整条失效，正文落回默认衬线字体（看起来像裸 HTML）。
+ * STYLE 是本文件写死的常量、不含任何用户内容，这里用它是安全的；
+ * 业务视图里仍然不要出现 dangerouslySetInnerHTML。
  */
 
 import type { Child } from 'hono/jsx';
@@ -50,11 +55,11 @@ export function AdminLayout(props: AdminLayoutProps) {
 				<meta charset="utf-8" />
 				<meta name="viewport" content="width=device-width, initial-scale=1" />
 				<meta name="robots" content="noindex" />
-				<title>{props.title}</title>
-				<style>{STYLE}</style>
-			</head>
-			<body>
-				{props.user ? (
+			<title>{props.title}</title>
+			<style dangerouslySetInnerHTML={{ __html: STYLE }} />
+		</head>
+		<body>
+			{props.user ? (
 					<header class="top">
 						<strong>博客后台</strong>
 						<a href="/admin">文章</a>
@@ -88,11 +93,11 @@ export function PlainLayout(props: { title: string; children: Child }) {
 				<meta charset="utf-8" />
 				<meta name="viewport" content="width=device-width, initial-scale=1" />
 				<meta name="robots" content="noindex" />
-				<title>{props.title}</title>
-				<style>{STYLE}</style>
-			</head>
-			<body>
-				<main>{props.children}</main>
+			<title>{props.title}</title>
+			<style dangerouslySetInnerHTML={{ __html: STYLE }} />
+		</head>
+		<body>
+			<main>{props.children}</main>
 			</body>
 		</html>
 	);

@@ -91,6 +91,11 @@ curl -s http://127.0.0.1:8788/ | tail -3          # 看到「全部通过」
 # 渲染压测（不连数据库）
 npm run bench:render
 
+# 本地预览前台（R2 静态页）：起预览器 + 改了模板后重渲本地 R2
+npm run preview:r2
+curl "http://127.0.0.1:8790/__publish?confirm=local&limit=200"   # 循环到 nextOffset 为 null
+curl "http://127.0.0.1:8790/__keys"                              # 列对象对账
+
 # 生产全量重建（写了模板/样式之后）
 npx wrangler dev -c wrangler.publish.jsonc --remote --port 8788
 curl "http://127.0.0.1:8788/full?offset=0&limit=50"   # 循环到 nextOffset 为 null

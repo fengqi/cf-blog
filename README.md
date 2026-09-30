@@ -78,6 +78,24 @@ curl "http://127.0.0.1:8787/cdn-cgi/local/scheduled"   # 本地手动触发 Cron
 > `theme/assets/` 下的文件却不跑 `build:assets`，页面里的 `<link>` 仍指向旧指纹，
 > 样式不会更新。改完资源要 **构建 → 全站重渲**，两步都不能省（design.md §7.2）。
 
+### 本地预览前台（R2 静态页）
+
+线上前台是「R2 + 自定义域名」，本地没有这一层，所以 `npm run preview:r2` 起一个预览器
+（`scripts/preview-worker.ts` + `wrangler.preview.jsonc`，**只绑本地 D1/R2**，不在任何部署路径里）。
+它按 R2 的真实规则把请求路径映射成 key（先解码、再精确匹配，`/` → 空 key），
+于是本地也能点着看：相对链接、`/theme/style.<hash>.css`、附件图片都能正常加载。
+
+```bash
+npm run preview:r2                     # http://127.0.0.1:8790
+# 改了模板/资源之后，把当前 D1 重新渲进本地 R2（nextOffset 不为 null 就带着它再调一次）
+npm run build:assets                                                    # 改了 theme/assets/ 才需要
+curl "http://127.0.0.1:8790/__publish?confirm=local&limit=200"
+curl "http://127.0.0.1:8790/__keys"                                     # 列对象，对账用
+```
+
+想预览**线上**桶里的对象（例如确认发布结果）：`npx wrangler dev -c wrangler.preview.jsonc --remote`。
+⚠️ 该模式下**不要**调 `/__publish` —— 那时绑定指向线上桶，这一步会写生产。
+
 ### 本地端到端验证
 
 跑的是**真实 workerd + 本地 D1/R2**，覆盖发布流水线、`needs_sync` 状态机、XSS 清洗、定时发布、删除：

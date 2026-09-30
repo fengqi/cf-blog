@@ -1,0 +1,29 @@
+/**
+ * 本地前台预览配置 —— 配合 `wrangler dev -c wrangler.preview.jsonc`
+ *
+ *   npm run preview:r2                                        # 预览本地 R2（http://127.0.0.1:8790）
+ *   npx wrangler dev -c wrangler.preview.jsonc --remote        # 预览线上桶（此模式别调 /__publish）
+ *
+ * 绑定与 wrangler.jsonc 保持一致，但**只绑预览需要的 D1 与 R2**（没有 KV、没有 secret），
+ * 入口是 scripts/preview-worker.ts：只提供「按路径取对象」「列对象」「本地重渲」三件事。
+ * 它不在任何部署路径里（CI 只构建 `main`），所以不会被误发到线上。
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "cf-blog-preview",
+	"main": "scripts/preview-worker.ts",
+	"compatibility_date": "2026-09-26",
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "blog-db",
+			"database_id": "db93b235-4ad8-4391-8e4c-1e9a82473f07"
+		}
+	],
+	"r2_buckets": [
+		{
+			"bucket_name": "blog-content",
+			"binding": "BUCKET"
+		}
+	]
+}

@@ -12,18 +12,25 @@
  */
 
 import { renderArchive } from '../../theme/archive';
+import { themeAsset } from '../../theme/assets';
 import { renderHome } from '../../theme/home';
-import { renderPost } from '../../theme/post';
 import type { ListPost } from '../../theme/components/list';
+import type { NavLink } from '../../theme/layout';
+import { renderOverview } from '../../theme/overview';
+import type { OverviewItem } from '../../theme/overview';
+import { renderPost } from '../../theme/post';
 import type { TermLink } from '../../theme/post';
 import { HTML_CONTENT_TYPE } from '../lib/r2';
 import type { RenderedObject } from '../lib/r2';
 import { formatDateOnly, formatRfc822, monthOf } from '../lib/time';
 import {
+	OVERVIEW_SECTIONS,
 	absoluteUrl,
 	categoryPath,
+	homePath,
 	indexPagePath,
 	monthPath,
+	overviewPath,
 	pageCount,
 	pageSlice,
 	postPath,
@@ -38,6 +45,14 @@ const SITEMAP_CONTENT_TYPE = 'application/xml; charset=utf-8';
 
 /** feed 里最多放多少条（RSS 惯例，跟分页大小无关） */
 const FEED_ITEMS = 20;
+
+/**
+ * 顶栏「关于」指向的独立页面 slug。
+ *
+ * 它是**兜底约定**，不是配置项：站点里没有这个 slug 的页面时整条导航项不渲染 ——
+ * 顶栏挂一个指向 404 的「关于」比少一条链接糟得多。
+ */
+const ABOUT_SLUG = 'about';
 
 // ---------------------------------------------------------------------------
 // 数据 → 主题视图模型
@@ -64,11 +79,58 @@ function toListPost(post: PostRecord): ListPost {
 	};
 }
 
+/**
+ * 顶栏导航 —— **全站唯一的一套站内导航**（侧栏已经整站移除）。
+ *
+ * 「不展开」是刻意的：这几条不做下拉菜单，点进去就是清单页
+ * （`/categories/`、`/tags/`、`/archives/`，见 `renderOverviewPage`）。
+ * 好处是导航里不再有任何**随发布而变**的内容 —— 计数只出现在清单页的 HTML 里，
+ * 也就是 3 个对象，而不是每个页面一份。
+ */
+function toNav(snapshot: SiteSnapshot): NavLink[] {
+	const nav: NavLink[] = [
+		{ text: '首页', url: homePath() },
+		{ text: '分类', url: overviewPath('categories') },
+		{ text: '标签', url: overviewPath('tags') },
+		{ text: '归档', url: overviewPath('archives') },
+	];
+	const about = snapshot.pages.find((page) => page.slug === ABOUT_SLUG);
+	if (about) nav.push({ text: '关于', url: standalonePagePath(about.slug) });
+	return nav;
+}
+
+/**
+ * 术语 → 索引项。**只列还有文章的分类/标签**：库里有一批只挂在草稿上的标签
+ * （本库 76 个，它们的归档页确实存在、也进 sitemap），列进清单只会把人带到空页面。
+ *
+ * 排序必须**确定性**：文章数降序 → 名称升序 → mid 升序。名称可能重复，
+ * 用 mid 兜底才能保证同一份数据每次渲染出的顺序一致（否则对象内容会无谓地漂）。
+ */
+function termItems(terms: TermRecord[], path: (slug: string) => string): OverviewItem[] {
+	return terms
+		.filter((term) => term.count > 0)
+		.sort((a, b) => {
+			if (b.count !== a.count) return b.count - a.count;
+			if (a.name !== b.name) return a.name < b.name ? -1 : 1;
+			return a.mid - b.mid;
+		})
+		.map((term) => ({
+			name: term.name,
+			url: path(term.slug),
+			count: term.count,
+			description: term.description,
+		}));
+}
+
 // ---------------------------------------------------------------------------
 // 各类型对象
 // ---------------------------------------------------------------------------
 
-function renderArticleOrPage(snapshot: SiteSnapshot, target: Extract<Target, { kind: 'post' | 'page' }>): RenderedObject {
+function renderArticleOrPage(
+	snapshot: SiteSnapshot,
+	target: Extract<Target, { kind: 'post' | 'page' }>,
+	nav: NavLink[],
+): RenderedObject {
 	const { post } = target;
 
 	// 独立页面没有上一篇/下一篇；文章按 created 倒序取相邻两条
@@ -107,12 +169,17 @@ function renderArticleOrPage(snapshot: SiteSnapshot, target: Extract<Target, { k
 		canonicalPath,
 		prev,
 		next,
+		nav,
 	});
 
 	return { key: target.key, kind: 'post', body: html, contentType: HTML_CONTENT_TYPE };
 }
 
-function renderIndex(snapshot: SiteSnapshot, target: Extract<Target, { kind: 'index' }>): RenderedObject {
+function renderIndex(
+	snapshot: SiteSnapshot,
+	target: Extract<Target, { kind: 'index' }>,
+	nav: NavLink[],
+): RenderedObject {
 	const perPage = snapshot.postsPerPage;
 	const totalPosts = snapshot.posts.length;
 	const totalPages = pageCount(totalPosts, perPage);
@@ -127,6 +194,7 @@ function renderIndex(snapshot: SiteSnapshot, target: Extract<Target, { kind: 'in
 		nextUrl: page < totalPages ? indexPagePath(page + 1) : undefined,
 		// `/` 与 `/page/1/` 内容重复：两者的 canonical 都指向 `/`，且 `page/1/` 不进 sitemap
 		canonicalPath: page === 1 ? '/' : indexPagePath(page),
+		nav,
 	});
 
 	return { key: target.key, kind: 'index', body: html, contentType: HTML_CONTENT_TYPE };
@@ -146,7 +214,11 @@ function postsOfTerm(snapshot: SiteSnapshot, term: TermRecord): PostRecord[] {
 	);
 }
 
-function renderTermArchive(snapshot: SiteSnapshot, target: Extract<Target, { kind: 'archive' }>): RenderedObject {
+function renderTermArchive(
+	snapshot: SiteSnapshot,
+	target: Extract<Target, { kind: 'archive' }>,
+	nav: NavLink[],
+): RenderedObject {
 	const { term } = target;
 	const perPage = snapshot.postsPerPage;
 	const totalPages = pageCount(term.count, perPage);
@@ -166,12 +238,17 @@ function renderTermArchive(snapshot: SiteSnapshot, target: Extract<Target, { kin
 		prevUrl: page > 1 ? (page - 1 === 1 ? paths.bare : paths.page(page - 1)) : undefined,
 		nextUrl: page < totalPages ? paths.page(page + 1) : undefined,
 		canonicalPath: page === 1 ? paths.bare : paths.page(page),
+		nav,
 	});
 
 	return { key: target.key, kind: 'archive', body: html, contentType: HTML_CONTENT_TYPE };
 }
 
-function renderMonthArchive(snapshot: SiteSnapshot, target: Extract<Target, { kind: 'month' }>): RenderedObject {
+function renderMonthArchive(
+	snapshot: SiteSnapshot,
+	target: Extract<Target, { kind: 'month' }>,
+	nav: NavLink[],
+): RenderedObject {
 	const { year, month } = target;
 	const timezoneOffset = snapshot.site.timezoneOffset;
 	const posts = snapshot.posts.filter((post) => {
@@ -192,9 +269,71 @@ function renderMonthArchive(snapshot: SiteSnapshot, target: Extract<Target, { ki
 		page: 1,
 		totalPages: 1,
 		canonicalPath: monthPath(year, month),
+		nav,
 	});
 
 	return { key: target.key, kind: 'archive', body: html, contentType: HTML_CONTENT_TYPE };
+}
+
+/**
+ * 全站索引页：`/categories/`、`/tags/`、`/archives/`（顶栏导航的落点）。
+ *
+ * 它们承担的是原来侧栏那份「浏览入口」的职责，但**只在这三个对象里**出现计数 ——
+ * 这正是「文章页去掉侧栏」换来的收益：可变数据从 765 个页面收敛到 3 个。
+ */
+function renderOverviewPage(
+	snapshot: SiteSnapshot,
+	target: Extract<Target, { kind: 'overview' }>,
+	nav: NavLink[],
+): RenderedObject {
+	const { section } = target;
+
+	let title: string;
+	let items: OverviewItem[];
+	switch (section) {
+		case 'categories':
+			title = '分类';
+			items = termItems(snapshot.categories, categoryPath);
+			break;
+		case 'tags':
+			title = '标签';
+			items = termItems(snapshot.tags, tagPath);
+			break;
+		case 'archives':
+			title = '归档';
+			// `snapshot.months` 已经是倒序（最近的月份在前），这里不再排一次
+			items = snapshot.months.map((month) => ({
+				name: `${month.year} 年 ${month.month} 月`,
+				url: monthPath(month.year, month.month),
+				count: month.count,
+			}));
+			break;
+	}
+
+	const unit = section === 'tags' ? '个标签' : '个分类';
+	/**
+	 * 措辞要和实际渲染的内容一致：`termItems` 会滤掉计数为 0 的术语
+	 * （本库有 76 个只挂在草稿上的标签），所以不能说「共 198 个标签」。
+	 */
+	const description =
+		items.length === 0
+			? undefined
+			: section === 'archives'
+				? `共 ${items.length} 个月份，最近的排在最前`
+				: `共 ${items.length} ${unit}（只列有文章的），按文章数排列`;
+
+	const html = renderOverview({
+		site: snapshot.site,
+		title,
+		description,
+		items,
+		emptyText:
+			section === 'archives' ? '还没有文章，所以没有归档。' : `还没有任何${title}。`,
+		canonicalPath: overviewPath(section),
+		nav,
+	});
+
+	return { key: target.key, kind: 'overview', body: html, contentType: HTML_CONTENT_TYPE };
 }
 
 // ---------------------------------------------------------------------------
@@ -269,6 +408,11 @@ function renderSitemap(snapshot: SiteSnapshot): string {
 		entries.push({ loc: absoluteUrl(base, indexPagePath(page)) });
 	}
 
+	// 索引页：三个固定 URL，不做分页（导航入口，不该被拆成好几页）
+	for (const section of OVERVIEW_SECTIONS) {
+		entries.push({ loc: absoluteUrl(base, overviewPath(section)) });
+	}
+
 	for (const post of snapshot.posts) {
 		entries.push({ loc: absoluteUrl(base, articlePath(post)), lastmod: formatDateOnly(post.modified) });
 	}
@@ -308,17 +452,29 @@ ${body}
 // 对外入口
 // ---------------------------------------------------------------------------
 
-export function renderTarget(snapshot: SiteSnapshot, target: Target): RenderedObject {
+/**
+ * 渲染一个目标对象。
+ *
+ * `nav` 做成参数是为了让 `renderTargets` 只算一次（见 `toNav` 的注释）；
+ * 直接调用本函数（草稿预览就这么用）时不传，默认值会当场算一份。
+ */
+export function renderTarget(
+	snapshot: SiteSnapshot,
+	target: Target,
+	nav: NavLink[] = toNav(snapshot),
+): RenderedObject {
 	switch (target.kind) {
 		case 'post':
 		case 'page':
-			return renderArticleOrPage(snapshot, target);
+			return renderArticleOrPage(snapshot, target, nav);
 		case 'index':
-			return renderIndex(snapshot, target);
+			return renderIndex(snapshot, target, nav);
+		case 'overview':
+			return renderOverviewPage(snapshot, target, nav);
 		case 'archive':
-			return renderTermArchive(snapshot, target);
+			return renderTermArchive(snapshot, target, nav);
 		case 'month':
-			return renderMonthArchive(snapshot, target);
+			return renderMonthArchive(snapshot, target, nav);
 		case 'feed':
 			return { key: target.key, kind: 'feed', body: renderFeed(snapshot), contentType: FEED_CONTENT_TYPE };
 		case 'sitemap':
@@ -328,11 +484,20 @@ export function renderTarget(snapshot: SiteSnapshot, target: Target): RenderedOb
 				body: renderSitemap(snapshot),
 				contentType: SITEMAP_CONTENT_TYPE,
 			};
+		case 'asset': {
+			// 内容和 contentType 的权威来源是清单本身，这里只做搬运（§7.2 的 immutable 由 kind 决定）
+			const asset = themeAsset(target.name);
+			return { key: target.key, kind: 'asset', body: asset.content, contentType: asset.contentType };
+		}
 	}
 }
 
-export function renderTargets(snapshot: SiteSnapshot, targets: Target[]): RenderedObject[] {
-	return targets.map((target) => renderTarget(snapshot, target));
+export function renderTargets(
+	snapshot: SiteSnapshot,
+	targets: Target[],
+	nav: NavLink[] = toNav(snapshot),
+): RenderedObject[] {
+	return targets.map((target) => renderTarget(snapshot, target, nav));
 }
 
 /** 全站渲染：§12.2 首次发布与 §6.5 「全站重新渲染」都用它 */

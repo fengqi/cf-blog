@@ -1,5 +1,5 @@
 /**
- * 前台主题 · 页面骨架（设计文档 §6.1 / §11 / §14.1）
+ * 前台主题 · 页面骨架（设计文档 §6.1 / §7.2 / §11 / §14.1）
  *
  * 本目录的三条纪律：
  *   1. **零依赖**。不 import 任何包，不碰 D1 / R2 / Hono —— 它要在发布流水线里裸跑。
@@ -9,6 +9,15 @@
  *      所有文本都必须经过 escapeHtml()。文章正文是唯一注入原始 HTML 的地方，
  *      它已在写入 D1 前清洗（§8.3）。
  */
+
+import { stylesheetLinks, themeScripts } from './assets';
+import { escapeHtml, formatDate } from './html';
+
+/**
+ * 转义与时间格式化搬到了 `html.ts`。这里原样再导出一次，
+ * 是为了不动已有调用点（`theme/post.ts`、`theme/components/list.ts` 等）。
+ */
+export { escapeHtml, formatDate, formatDateTime } from './html';
 
 /** 站点级配置，来自 options 表（§4.1 / §7.3）。 */
 export interface SiteInfo {
@@ -29,6 +38,15 @@ export interface NavLink {
 	url: string;
 }
 
+/**
+ * 页面容器宽度。三档，由 `body` 上的类控制（见 style.css 的「容器宽度」一节）：
+ *   - `default` 1080px —— 目前没有页面用它，留给将来需要宽幅的页面
+ *   - `narrow`   44rem  —— 首页/分页/归档/索引页：**只有列表，没有侧栏**，
+ *                          不限制宽度的话一行能塞六十多个汉字
+ *   - `post`     62rem  —— 文章页：正文 + 右侧目录两栏，宽度算给正文用
+ */
+export type LayoutWidth = 'default' | 'narrow' | 'post';
+
 export interface LayoutOptions {
 	site: SiteInfo;
 	/** 主内容 HTML，调用方拼好并已转义 */
@@ -41,46 +59,31 @@ export interface LayoutOptions {
 	/** canonical 用的**相对路径**（如 `/default/760.html`），与 site.url 拼成绝对 URL；
 	 *  不传则不输出 canonical。传 '/' 表示首页。 */
 	canonicalPath?: string;
-	/** 导航链接，默认只有「首页」 */
+	/** 顶栏导航链接，默认只有「首页」 */
 	nav?: NavLink[];
 	/** 页头站点名是否用 <h1>（首页用 h1，文章页用默认的 <p>，避免一页两个 h1） */
 	siteTitleTag?: 'h1' | 'p';
-	/** 额外的 <head> 内容（后续接入带指纹的主题资源，见 §7.2 / §14.2） */
+	/** 页面容器宽度，默认 `default` */
+	width?: LayoutWidth;
+	/** 额外的 <head> 内容（带指纹的主题资源 `<link>` 由本文件自动注入，见 §7.2） */
 	extraHead?: string;
 	/** 额外的 </body> 前内容 */
 	extraFoot?: string;
 }
 
 /**
- * HTML 转义。& 必须第一个替换，否则会把后面生成的实体再转一遍。
- */
-export function escapeHtml(value: unknown): string {
-	return String(value ?? '')
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&#39;');
-}
-
-/**
- * 把 Unix 秒格式化成 `YYYY-MM-DD`。
+ * 首屏应用主题的内联脚本。
  *
- * 故意不用 Intl：不同运行时（workerd / Node）的 ICU 数据不一致，而这是发布时渲染、
- * 一次写进 R2 的内容，必须可复现。
+ * **必须内联、必须同步、必须放在 `<head>`**：`app.js` 是 `defer` 的，等它跑起来页面已经
+ * 用亮色画过了，暗色用户会看到一帧闪白。它只做两件事：
+ *   ① 给 `<html>` 加 `.js` —— 切换按钮的显隐由这个类控制（没有 JS 就别露出死按钮）
+ *   ② 若用户手动选过主题（localStorage），立刻把 `data-theme` 设上
+ * 没选过就不设 —— CSS 的 `prefers-color-scheme` 分支会接管，**没有 JS 也能进暗色**。
  */
-export function formatDate(timestamp: number, offsetHours = 8): string {
-	const shifted = new Date((timestamp + offsetHours * 3600) * 1000);
-	const year = shifted.getUTCFullYear();
-	const month = String(shifted.getUTCMonth() + 1).padStart(2, '0');
-	const day = String(shifted.getUTCDate()).padStart(2, '0');
-	return `${year}-${month}-${day}`;
-}
-
-/** `<time datetime>` 用的机器可读时间（UTC ISO 8601，与时区展示无关）。 */
-export function formatDateTime(timestamp: number): string {
-	return new Date(timestamp * 1000).toISOString();
-}
+const THEME_INIT_SCRIPT =
+	`<script>(function(){var root=document.documentElement;root.className+=" js";` +
+	`try{var saved=localStorage.getItem("theme");` +
+	`if(saved==="dark"||saved==="light")root.setAttribute("data-theme",saved);}catch(err){}})();</script>`;
 
 /** 站点根 URL 归一化：去掉末尾斜杠，便于拼相对路径。 */
 function siteBase(site: SiteInfo): string {
@@ -123,34 +126,47 @@ export function renderLayout(options: LayoutOptions): string {
 	head.push(
 		`<link rel="alternate" type="application/rss+xml" title="${escapeHtml(site.title)}" href="${escapeHtml(base)}/feed/">`,
 	);
+	// 带指纹的主题样式（§7.2）：路径来自 assets.generated.ts，文件名即缓存键
+	head.push(stylesheetLinks());
+	head.push(THEME_INIT_SCRIPT);
 	if (options.extraHead) head.push(options.extraHead);
 
 	const navHtml = nav
 		.map((link) => `<a href="${escapeHtml(link.url)}">${escapeHtml(link.text)}</a>`)
-		.join('\n\t\t');
+		.join('\n\t\t\t');
 
 	const descriptionHtml = site.description
-		? `\n\t\t<p class="site-description">${escapeHtml(site.description)}</p>`
+		? `\n\t\t\t\t<p class="site-description">${escapeHtml(site.description)}</p>`
 		: '';
+
+	const bodyClass = options.width && options.width !== 'default' ? ` class="layout-${options.width}"` : '';
 
 	return `<!DOCTYPE html>
 <html lang="${escapeHtml(lang)}">
 <head>
 	${head.join('\n\t')}
 </head>
-<body>
+<body${bodyClass}>
 	<header class="site-header">
-		<${titleTag} class="site-title"><a href="/">${escapeHtml(site.title)}</a></${titleTag}>${descriptionHtml}
-		<nav class="site-nav">
-		${navHtml}
-		</nav>
+		<div class="container site-header-inner">
+			<div class="site-brand">
+				<${titleTag} class="site-title"><a href="/">${escapeHtml(site.title)}</a></${titleTag}>${descriptionHtml}
+			</div>
+			<nav class="site-nav">
+			${navHtml}
+			</nav>
+			<button type="button" class="theme-toggle" data-theme-toggle aria-label="切换深色 / 浅色模式" title="切换深色 / 浅色模式"></button>
+		</div>
 	</header>
-	<main>
+	<main class="container site-main">
 ${content}
 	</main>
 	<footer class="site-footer">
-		<p>© ${year} ${escapeHtml(site.title)}</p>
-	</footer>${options.extraFoot ? '\n' + options.extraFoot : ''}
+		<div class="container">
+			<p>© ${year} ${escapeHtml(site.title)}</p>
+		</div>
+	</footer>
+	${themeScripts()}${options.extraFoot ? '\n' + options.extraFoot : ''}
 </body>
 </html>
 `;

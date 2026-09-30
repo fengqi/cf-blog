@@ -50,6 +50,8 @@ export function renderHome(context: HomeContext): string {
 		title: page > 1 ? `第 ${page} 页` : undefined,
 		canonicalPath: context.canonicalPath ?? '/',
 		nav: context.nav,
+		// 首页只有列表，没有侧栏 —— 限宽居中，别让摘要一行铺满 1080px
+		width: 'narrow',
 		// 首页自己的 h1 就是站点名，避免页头再出一个 h1
 		siteTitleTag: 'h1',
 	});

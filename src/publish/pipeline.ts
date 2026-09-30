@@ -40,6 +40,7 @@ import { loadSnapshot } from './snapshot';
 import {
 	contentDeleteKeys,
 	contentPublishTargets,
+	postDeleteTargets,
 	postKeyOf,
 	postPublishTargets,
 	primaryCategory,
@@ -273,9 +274,13 @@ export async function rebuildTargetsSlice(
 }
 
 /**
- * 删除一篇文章：删掉它的对象 + 旧 URL 对象，然后重建受影响的归档。
+ * 删除一篇文章：删掉它的对象 + 旧 URL 对象，然后**按影响面**重建。
  *
  * 不删旧 URL（§5.1 方案 A 只针对**改地址**）；文章真被删了，旧 URL 也一并清掉。
+ *
+ * ⚠️ 重建范围**只有受影响的几十个对象**（`postDeleteTargets`），不是全站。
+ * 这里曾经直接调 `siteTargets(snapshot)`，删一篇文章要重写全站 800 个对象 ——
+ * 其中 700 多个和这次删除毫无关系，纯粹是浪费（§13.1 的实测数据）。
  */
 export async function deletePost(
 	env: PublishEnv,
@@ -289,15 +294,21 @@ export async function deletePost(
 	const retired = await listRetiredKeysByCid(db, cid);
 	const keys = [...contentDeleteKeys(post), ...retired];
 
-	// ⚠️ 先删 D1 行再删对象：顺序反了的话，下面的全站重建会把文章又写回去（快照里还有它）
+	// ⚠️ 先删 D1 行再删对象：顺序反了的话，下面按快照重建会把文章又写回去（快照里还有它）
 	await deleteContent(db, cid);
 	const outcome = await deleteKeys(env.BUCKET, keys);
 
-	// 文章没了，归档与分页都变了 —— 用剩下的内容重建一次
+	/**
+	 * 文章没了，归档与分页都变了 —— 用剩下的内容重建**受影响的那一批**。
+	 *
+	 * `post` 是删除前读到的完整记录（带分类/标签/创建时间），
+	 * 而 `snapshot` 是删除后的 —— 两者都要：
+	 * 前者用来知道「影响了哪些术语与月份」，后者用来算「现在每个归档有几页」。
+	 */
 	const { snapshot } = await loadSnapshot(env, 'publish:delete');
 	await ensureRendered(env, snapshot);
 	const rebuild = async () => {
-		await writeTargets(env, snapshot, siteTargets(snapshot));
+		await writeTargets(env, snapshot, postDeleteTargets(snapshot, post));
 	};
 	if (ctx) ctx.waitUntil(rebuild());
 	else await rebuild();

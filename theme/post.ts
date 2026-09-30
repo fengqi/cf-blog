@@ -7,6 +7,8 @@
 
 import { escapeHtml, formatDate, formatDateTime, renderLayout } from './layout';
 import type { NavLink, SiteInfo } from './layout';
+import { extractToc } from './toc';
+import type { TocItem } from './toc';
 
 /** 分类 / 标签链接 */
 export interface TermLink {
@@ -68,6 +70,18 @@ function renderTermLinks(className: string, label: string, terms: TermLink[] | u
 	return `<span class="post-${className}">${label}：${links}</span>`;
 }
 
+/** 目录条目（桌面右栏与窄屏折叠块共用同一份 li） */
+function renderTocItems(items: TocItem[]): string {
+	return items
+		.map(
+			(item) =>
+				`\t\t\t\t<li class="toc-item toc-level-${item.level}"><a href="#${escapeHtml(item.id)}">${escapeHtml(
+					item.text,
+				)}</a></li>`,
+		)
+		.join('\n');
+}
+
 export function renderPost(context: PostContext): string {
 	const { site, post, prev, next } = context;
 
@@ -101,15 +115,58 @@ export function renderPost(context: PostContext): string {
 		);
 	}
 
-	const content = `	<article class="post">
+	/**
+	 * 目录在这里抽取，**锚点 id 同时写回正文**（见 `toc.ts` 的说明）。
+	 * 所以必须在拼 `post.html` 之前做，渲染完的 `contentHtml` 才是带 id 的那份。
+	 */
+	const { html: contentHtml, items: toc } = extractToc(post.html);
+	const tocItems = toc.length > 0 ? renderTocItems(toc) : '';
+
+	/**
+	 * 目录出现两遍是**故意的**：
+	 *   - `.post-toc-inline`（`<details>`）给窄屏，用原生折叠，不需要 JS；
+	 *   - `.post-toc`（右栏）给宽屏，sticky 跟着正文。
+	 * CSS 按 `62rem` 断点二选一显示。只出现一次的方案要么需要 JS 搬 DOM，
+	 * 要么得给 `<details>` 做「宽屏强制展开」的 hack（`open` 由 UA 控制，CSS 盖不住）。
+	 */
+	const inlineToc =
+		toc.length > 0
+			? `
+		<details class="post-toc-inline">
+			<summary>目录</summary>
+			<ol class="toc-list">
+${tocItems}
+			</ol>
+		</details>`
+			: '';
+
+	const article = `	<article class="post">
 		<h1 class="post-title">${escapeHtml(post.title)}</h1>
 		<p class="post-meta">
 			${meta.join('\n\t\t\t')}
-		</p>
+		</p>${inlineToc}
 		<div class="post-content">
-${post.html}
+${contentHtml}
 		</div>
 	</article>${navHtml.length ? `\n\t<nav class="post-nav">\n\t\t${navHtml.join('\n\t\t')}\n\t</nav>` : ''}`;
+
+	// 没有 h2/h3 的文章（短文、纯代码笔记）不渲染空目录栏，正文自己居中即可
+	const content =
+		toc.length > 0
+			? `	<div class="post-layout post-layout--with-toc">
+		<div class="post-body">
+${article}
+		</div>
+		<aside class="post-toc" aria-label="文章目录">
+			<h2 class="post-toc-title">目录</h2>
+			<ol class="toc-list">
+${tocItems}
+			</ol>
+		</aside>
+	</div>`
+			: `	<div class="post-layout">
+${article}
+	</div>`;
 
 	return renderLayout({
 		site,
@@ -117,5 +174,7 @@ ${post.html}
 		title: post.title,
 		canonicalPath: context.canonicalPath || post.url,
 		nav: context.nav,
+		// 文章页固定 62rem：有目录时给两栏留位置，没目录时正文靠 `.post-body` 自己限宽
+		width: 'post',
 	});
 }

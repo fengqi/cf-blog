@@ -47,6 +47,22 @@ export const HOME_KEY = '';
 export const FEED_KEY = 'feed/';
 export const SITEMAP_KEY = 'sitemap.xml';
 
+/**
+ * 全站索引页的三个分区：`/categories/`、`/tags/`、`/archives/`。
+ *
+ * **这三个 URL 老站不存在，是本次改版新增的**：站内的「浏览入口」从侧栏搬到了
+ * 独立页面（顶栏导航点进去）。§5.1 的 URL 保全原则只要求老 URL 继续 200，
+ * 不禁止新增地址，所以纯新增不违反它。
+ *
+ * 形状上和现有 URL 都不会撞：
+ *   - 分类归档是 `/category/<slug>/`（**单数**）
+ *   - 独立页面是 `<slug>.html`（带 `.html` 后缀）
+ *   - 年月归档是 `<4 位年>/<2 位月>/`（段全是数字）
+ */
+export const OVERVIEW_SECTIONS = ['categories', 'tags', 'archives'] as const;
+
+export type OverviewSection = (typeof OVERVIEW_SECTIONS)[number];
+
 /** 首页分页。注意 page=1 对应的是 `page/1/` 这个**副本对象**，`/` 本身是 HOME_KEY */
 export function indexPageKey(page: number): string {
 	return `page/${page}/`;
@@ -75,6 +91,11 @@ export function tagKey(slug: string, page = 0): string {
 /** 年月归档：只有裸形式，没有 `/<n>/` 变体（实测 404） */
 export function monthKey(year: number, month: number): string {
 	return `${year}/${String(month).padStart(2, '0')}/`;
+}
+
+/** 索引页的 R2 key：`categories/` / `tags/` / `archives/` */
+export function overviewKey(section: OverviewSection): string {
+	return `${section}/`;
 }
 
 /** 附件：去掉前导斜杠就是 key（§9 要求路径与 Typecho 完全一致） */
@@ -113,6 +134,11 @@ export function tagPath(slug: string, page = 0): string {
 
 export function monthPath(year: number, month: number): string {
 	return `/${year}/${String(month).padStart(2, '0')}/`;
+}
+
+/** 索引页的 URL path：`/categories/` / `/tags/` / `/archives/` */
+export function overviewPath(section: OverviewSection): string {
+	return `/${section}/`;
 }
 
 export function feedPath(): string {

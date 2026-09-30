@@ -8,13 +8,16 @@
  * 否则分页对象会算少（例如新文章让某个标签从 1 页变成 2 页，而快照还停留在 1 页）。
  */
 
+import { THEME_ASSETS } from '../../theme/assets';
 import {
 	FEED_KEY,
 	HOME_KEY,
+	OVERVIEW_SECTIONS,
 	SITEMAP_KEY,
 	categoryKey,
 	indexPageKey,
 	monthKey,
+	overviewKey,
 	pageCount,
 	postKey,
 	standalonePageKey,
@@ -45,6 +48,17 @@ export function postKeyOf(post: PostRecord): string {
 
 export function standaloneKeyOf(page: PostRecord): string {
 	return standalonePageKey(page.slug);
+}
+
+/**
+ * 主题资源（带指纹的 CSS/JS）—— 每个都是一个独立的 R2 对象。
+ *
+ * **排在全站清单最前面**：`rebuildTargetsSlice` 是按下标切片的，
+ * 把资源放在第 0 条，意味着**任何一次分批重建的第一批都会顺带刷新样式**。
+ * 放到末尾的话，只跑前几批就以为「重建完了」的人会拿到新 HTML + 旧样式。
+ */
+export function themeAssetTargets(): Target[] {
+	return THEME_ASSETS.map((asset) => ({ key: asset.key, kind: 'asset' as const, name: asset.name }));
 }
 
 /** 首页 + 全部分页（page/1/ 是首页的副本，也要生成，§5.1） */
@@ -82,6 +96,21 @@ function monthTargets(snapshot: SiteSnapshot): Target[] {
 }
 
 /**
+ * 全站索引页：`/categories/`、`/tags/`、`/archives/`（顶栏导航的落点）。
+ *
+ * 它们是**全局可变数据**的展示面（每个分类/标签/月份的文章数），所以
+ * 发一篇文章就会让三个对象一起变 —— 但只有 3 个，比让计数长期陈旧便宜得多。
+ * 这也是「文章页不再带侧栏」换来的：可变数据从 765 个页面收敛到 3 个页面。
+ */
+export function overviewTargets(): Target[] {
+	return OVERVIEW_SECTIONS.map((section) => ({
+		key: overviewKey(section),
+		kind: 'overview' as const,
+		section,
+	}));
+}
+
+/**
  * 内容有没有 URL。独立页面永远有（单段 key）；文章**必须有分类** ——
  * permalink 形状是 `/<category>/<slug>.html`，没分类就拼不出地址。
  */
@@ -99,7 +128,10 @@ export function siteTargets(snapshot: SiteSnapshot): Target[] {
 	const byCid = new Map(snapshot.posts.map((post) => [post.cid, post]));
 
 	const targets: Target[] = [
+		// 主题资源排最前，理由见 themeAssetTargets 的注释
+		...themeAssetTargets(),
 		...indexTargets(snapshot),
+		...overviewTargets(),
 		...snapshot.posts.map((post) => ({ key: postKeyOf(post), kind: 'post' as const, post })),
 		...snapshot.pages.map((page) => ({
 			key: standaloneKeyOf(page),
@@ -144,6 +176,8 @@ export function postPublishTargets(snapshot: SiteSnapshot, post: PostRecord): Ta
 	const wanted = new Set<string>([postKeyOf(post)]);
 
 	for (const target of indexTargets(snapshot)) wanted.add(target.key);
+	// 索引页上带各术语的文章数，发一篇就会变 —— 3 个对象，直接一起重建
+	for (const target of overviewTargets()) wanted.add(target.key);
 	for (const target of termTargets(primaryCategory(post), perPage, categoryKey)) wanted.add(target.key);
 	for (const tag of post.tags) {
 		for (const target of termTargets(tag, perPage, tagKey)) wanted.add(target.key);
@@ -172,9 +206,59 @@ export function postPublishTargets(snapshot: SiteSnapshot, post: PostRecord): Ta
  *
  * 页面**不出现在**首页列表、归档、Feed 里，所以只有它自己和 sitemap 需要重建
  * （sitemap 里列了页面）。这一点和文章不同，别照抄 `postPublishTargets`。
+ *
+ * 三个索引页也**不用重建**：它们列的是分类/标签/月份的文章数，与独立页面无关。
  */
 export function pagePublishTargets(snapshot: SiteSnapshot, page: PostRecord): Target[] {
 	const wanted = new Set<string>([standaloneKeyOf(page), SITEMAP_KEY]);
+	return siteTargets(snapshot).filter((target) => wanted.has(target.key));
+}
+
+/**
+ * 删除一篇文章后要重建的子集。
+ *
+ * 与 `postPublishTargets` 的唯一差别是**不含文章页本身**（已经被删了）。
+ * 术语必须用**删除后的新快照**重新解析：传进来的 `record` 拿的是删除前的 count，
+ * 按它算分页会多算一页。
+ *
+ * ⚠️ 调用时机：D1 里那条记录**必须已经删掉**，否则 `snapshot` 里还有它，
+ * 分页与归档会照旧把它算进去。
+ *
+ * 本函数是「删一篇文章别重写全站 800 个对象」的落点：受影响的是
+ * 首页+分页、三个索引页、该文章自己的分类/标签归档、所在月份、feed、sitemap。
+ * 其余 700 多个对象和这次删除毫无关系。
+ */
+export function postDeleteTargets(snapshot: SiteSnapshot, record: PostRecord): Target[] {
+	const perPage = snapshot.postsPerPage;
+	const wanted = new Set<string>();
+
+	for (const target of indexTargets(snapshot)) wanted.add(target.key);
+	for (const target of overviewTargets()) wanted.add(target.key);
+
+	for (const term of record.categories) {
+		const current = snapshot.categories.find((item) => item.mid === term.mid);
+		if (!current) continue;
+		for (const target of termTargets(current, perPage, categoryKey)) wanted.add(target.key);
+	}
+	for (const term of record.tags) {
+		const current = snapshot.tags.find((item) => item.mid === term.mid);
+		if (!current) continue;
+		for (const target of termTargets(current, perPage, tagKey)) wanted.add(target.key);
+	}
+
+	/**
+	 * 该月如果一篇不剩，快照的 `months` 里就没有它了 —— 和 `siteTargets` 保持一致，
+	 * **不硬造一个空归档**。（遗留影响：那个月份对象会永久留在 R2 上，
+	 * 详见 `docs/design.md` 的「删除的边界」一节。）
+	 */
+	const created = monthOf(record.created, snapshot.site.timezoneOffset);
+	if (snapshot.months.some((item) => item.year === created.year && item.month === created.month)) {
+		wanted.add(monthKey(created.year, created.month));
+	}
+
+	wanted.add(FEED_KEY);
+	wanted.add(SITEMAP_KEY);
+
 	return siteTargets(snapshot).filter((target) => wanted.has(target.key));
 }
 

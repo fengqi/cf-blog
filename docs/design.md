@@ -608,6 +608,29 @@ markdown-it 的版本升级可能改变输出，所有文章共用一套渲染�
 
 主题资源要做到 `immutable`，文件名必须带指纹（如 `style.a1b2c3.css`），否则改了样式老用户拿不到新的。
 
+#### 主题资源流水线怎么落地的（2026-09-30 实装）
+
+| 环节 | 做法 |
+| --- | --- |
+| 打指纹 | `npm run build:assets` 读 `theme/assets/`，取内容 sha256 前 8 位，产出 `theme/assets.generated.ts` |
+| 写对象 | 资源作为 `kind: 'asset'` 的目标进 `siteTargets()` 的**最前面**，走同一套发布流水线，缓存头取 `lib/r2.ts` 的 `asset` 档 |
+| 页面引用 | `theme/layout.ts` 注入 `<link rel="stylesheet" href="/theme/style.<hash>.css">` 与 `<script src="…" defer>` |
+| 更新 | 改样式 → 重跑构建（hash 变）→ 全站重渲。**改了文件不重跑构建 = 改了不生效** |
+
+三条要记住的：
+
+1. **资源不进「单篇发布」的清单。** 发一篇文章没必要重写几个 `immutable` 对象 ——
+   只有 `siteTargets()`（全站重渲 / 分批重渲）里才有它们。e2e 有断言盯着这条。
+2. **旧指纹对象不删。** 全站重渲后页面指向新 hash，但边缘与浏览器可能还握着旧 HTML
+   （文章页是短缓存），它们会来请求旧文件名。与 §14.2 的告警是同一条纪律。
+3. **`assets.generated.ts` 要提交。** e2e / bench / 迁移脚本都直接读它，仓库里必须有一份可用的；
+   `deploy:ci` 里也会重跑一次构建，防止「改了 CSS 忘了构建」的漂移。
+
+> 为什么生成 `.ts` 模块，而不是在代码里 `import './style.css'`：主题层要在 workerd（发布流水线）、
+> tsx（bench / 迁移脚本）、tsc（类型检查）三种运行时里跑，而 wrangler 的 Text module rules
+> 只在 workerd 那一路生效 —— `tsx scripts/bench-render.ts` 会直接炸在 CSS import 上。
+> 生成字面量之后三条路径自然全部可用，也免了给三个 wrangler 配置各加一遍 rules。
+
 > **已实测结案（2026-09，见 §13.1）**：R2 自定义域名的响应确实走 Cloudflare CDN 缓存
 > （实测对象返回 `cf-cache-status: HIT`，`content-type` 来自写入时的 `httpMetadata`），
 > 但**默认只缓存特定扩展名，`.html` 不在其中** —— 所以文章页「发布即生效」成立，不需要主动 purge。
@@ -872,15 +895,21 @@ cf-blog/
 ├── migrations/
 │   └── 0001_init.sql              # 即 docs/schema.sql
 ├── theme/                         # ★ 主题源文件，发布时渲染并写入 R2
-│   ├── layout.ts                  # 页面骨架（唯一主题）
+│   ├── layout.ts                  # 页面骨架（唯一主题）：注入指纹资源、两栏结构、侧栏插槽
+│   ├── html.ts                    # 转义与日期格式化（侧栏也要用，独立成模块避免循环依赖）
+│   ├── assets.ts                  # 主题资源访问器（路径 / `<link>` / `<script>` 标签）
+│   ├── assets.generated.ts        # ★ 自动生成：资源清单 + 指纹，由 npm run build:assets 产出
 │   ├── home.ts                    # 首页与分页
 │   ├── post.ts                    # 文章 / 独立页面（共用：独立页面只是没有上一篇/下一篇）
 │   ├── archive.ts                 # 分类 / 标签 / 年月归档
 │   ├── components/                # 侧栏、分页器、标签云
-│   │   └── list.ts                # 已抽出：列表项 + 分页器（首页与归档共用）
-│   └── assets/                    # CSS / JS / 字体，构建时打指纹
+│   │   ├── list.ts                # 已抽出：列表项 + 分页器（首页与归档共用）
+│   │   └── sidebar.ts             # 已抽出：关于 / 分类 / 最新文章 / 归档 / 标签云
+│   │                              #   顺序按真实数据定：198 个标签 + 58 个月份全铺开会撑到 2163px，
+│   │                              #   故长列表走 `.sidebar-scroll` 限高、标签云排最后
+│   └── assets/                    # CSS / JS / 字体源文件，**构建时打指纹**（§7.2）
 │       ├── style.css
-│       └── app.js
+│       └── app.js                 # 暗色切换 + 轻量代码高亮（纯增量，不跑也不影响阅读）
 ├── src/
 │   ├── index.ts                   # Worker 入口（后台）+ Cron
 │   ├── types.ts                   # Env 绑定 + 运行时密钥类型（secret 生成不出来）
@@ -917,6 +946,7 @@ cf-blog/
 ├── scripts/
 │   ├── import-typecho.ts          # Typecho 迁移（含全量渲染 + 写入 R2）
 │   ├── hash-password.ts           # 生成 PBKDF2 串
+│   ├── build-assets.ts            # 主题资源打指纹 → theme/assets.generated.ts
 │   ├── bench-render.ts            # 渲染压测（§13.1 #4）：npm run bench:render
 │   ├── e2e-runner.ts              # 本地端到端断言集（104 项）
 │   ├── e2e-worker.ts              # e2e 的 Worker 入口，只在 wrangler.e2e.jsonc 里跑
@@ -1272,7 +1302,7 @@ Typecho 很可能对两个候选都返回 200（文章同时属于两个分类�
 - **2 张图在迁移前就丢了**：`/usr/uploads/2012/02/135359723.png`、`/usr/uploads/2013/02/1324381562.png`
   在老站和本地 `usr/uploads` 里都不存在（其中一张还被正文引用着）—— 属于既成事实，不是迁移造成的。
 - 作者 byline 链到 `https://fengqi.me`（老站用户资料里的 url 字段）。要改就改 `users.url`。
-- **主题还没有 CSS**：页面结构/内容/URL 都对，但外观是朴素 HTML（下一步做主题资源流水线，§7.2）。
+- **主题 CSS 已补齐**（2026-09-30）：指纹化写入 R2 + `<link>` 注入 + 侧栏/标签云/暗色模式，见 §7.2。
 
 ### 迁移中的坑
 

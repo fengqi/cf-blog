@@ -6,6 +6,7 @@
  */
 
 import type { SiteInfo } from '../../theme/layout';
+import type { OverviewSection } from '../lib/url';
 
 /** 分类或标签 */
 export interface TermRecord {
@@ -91,5 +92,21 @@ export type Target =
 			page: number;
 	  }
 	| { key: string; kind: 'month'; year: number; month: number }
+	/**
+	 * 全站索引页：`/categories/`、`/tags/`、`/archives/`（顶栏导航的落点）。
+	 *
+	 * 三个对象都带各术语/各月份的文章数，所以**发一篇文章就会让它们变** ——
+	 * 它们进 `siteTargets`，也进 `postPublishTargets`（3 个对象的代价，
+	 * 换来计数不会长期陈旧）。
+	 */
+	| { key: string; kind: 'overview'; section: OverviewSection }
 	| { key: string; kind: 'feed' }
-	| { key: string; kind: 'sitemap' };
+	| { key: string; kind: 'sitemap' }
+	/**
+	 * 主题资源（CSS / JS）。`name` 是 `theme/assets/` 下的源文件名，
+	 * 内容和 contentType 从 `theme/assets.generated.ts` 查（`name` 必须能在清单里找到）。
+	 *
+	 * 它进 `siteTargets`（全站重建时刷新），**不进 `postPublishTargets`** ——
+	 * 发一篇文章不需要重写这几个对象（§7.2 的 `immutable` 正是为此）。
+	 */
+	| { key: string; kind: 'asset'; name: string };

@@ -11,6 +11,7 @@
  *   - Markdown → 清洗（XSS 向量必须消失，§8.3）
  *   - 草稿预览只读（不写 R2、不改 needs_sync）
  *   - 定时文章转正后确实进了 R2（§12.3）
+ *   - 主题资源指纹：对象进 R2、`immutable` 缓存头、页面注入 `<link>`（§7.2）
  *
  * 夹具 SQL 属于测试代码，不受「SQL 只能写在 src/models」约束；应用代码里的 SQL 仍然只在 models/ 与 lib/db.ts。
  */
@@ -24,6 +25,8 @@ import { deletePost, publishAll, publishPost, renderPreview } from '../src/publi
 import type { PublishEnv } from '../src/publish/pipeline';
 import { loadSnapshot } from '../src/publish/snapshot';
 import { runScheduledTasks } from '../src/publish/sync';
+import { postDeleteTargets, postPublishTargets, siteTargets } from '../src/publish/targets';
+import { THEME_ASSETS, themeAsset, themeAssetPath } from '../theme/assets';
 
 /** e2e 用的绑定：发布所需 + 后台登录所需（密钥来自 wrangler.e2e.jsonc 的 vars） */
 export type E2EEnv = PublishEnv & {
@@ -47,6 +50,18 @@ const XSS_BODY = [
 	'',
 	'- 列表项 A',
 	'- 列表项 B',
+	'',
+	'## 二级标题',
+	'',
+	'二级标题下的正文。',
+	'',
+	'### 三级标题',
+	'',
+	'三级标题下的正文。',
+	'',
+	'## 二级标题',
+	'',
+	'重复的标题，用来验证锚点 id 会去重。',
 	'',
 	'```js',
 	'const a = 1;',
@@ -174,6 +189,56 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('单篇查询同样聚合出标签', single?.tags.length === 2, JSON.stringify(single?.tags.map((tag) => tag.slug)));
 
 	// -----------------------------------------------------------------------
+	// 1b. 主题资源在全站清单里的位置（§7.2）
+	// -----------------------------------------------------------------------
+	const themeTargets = siteTargets(loaded.snapshot);
+	const headKinds = themeTargets.slice(0, THEME_ASSETS.length).map((target) => target.kind);
+	check(
+		'主题资源排在全站清单最前（批量重建 offset=0 必写）',
+		headKinds.length === THEME_ASSETS.length && headKinds.every((kind) => kind === 'asset'),
+		headKinds.join(',') || '(空)',
+	);
+	check(
+		'每个主题资源都在全站清单里',
+		THEME_ASSETS.every((asset) => themeTargets.some((target) => target.kind === 'asset' && target.name === asset.name)),
+	);
+	check(
+		'单篇发布的清单不含主题资源（不为发一篇文章重写 immutable 对象）',
+		postPublishTargets(loaded.snapshot, loaded.snapshot.posts[0]).every((target) => target.kind !== 'asset'),
+	);
+
+	// -----------------------------------------------------------------------
+	// 1c. 索引页进了发布清单，删除则只重建受影响的对象（§6.5 / §13.1）
+	// -----------------------------------------------------------------------
+	const overviewKeys = ['categories/', 'tags/', 'archives/'];
+	check('三个索引页都在全站清单里', overviewKeys.every((key) => themeTargets.some((target) => target.key === key)));
+	check(
+		'发一篇文章会重建三个索引页（页面上的计数会变）',
+		overviewKeys.every((key) => postPublishTargets(loaded.snapshot, loaded.snapshot.posts[0]).some((target) => target.key === key)),
+	);
+
+	const deleteTargets = postDeleteTargets(loaded.snapshot, loaded.snapshot.posts[0]);
+	const deleteKeys = deleteTargets.map((target) => target.key);
+	check(
+		'删除清单里没有任何文章 / 独立页面对象',
+		!deleteKeys.some((key) => key.endsWith('.html')),
+		deleteKeys.filter((key) => key.endsWith('.html')).join(',') || '(无)',
+	);
+	check(
+		'删除只重建受影响的对象（线上是 35 而不是 800）',
+		deleteTargets.length < 30,
+		`${deleteTargets.length} 个 / 全站清单 ${themeTargets.length} 个`,
+	);
+	check(
+		'删除清单含该文章的分类与标签归档',
+		deleteKeys.includes('category/default/') && deleteKeys.includes('tag/安卓/'),
+	);
+	check(
+		'删除清单含首页、分页、索引页、feed 与 sitemap',
+		deleteKeys.includes('') && deleteKeys.includes('page/2/') && overviewKeys.every((key) => deleteKeys.includes(key)) && deleteKeys.includes('feed/') && deleteKeys.includes('sitemap.xml'),
+	);
+
+	// -----------------------------------------------------------------------
 	// 2. 全站发布（§12.2 / §6.5）
 	// -----------------------------------------------------------------------
 	lines.push('=== publishAll ===');
@@ -189,6 +254,11 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('归档 key：分类 + 中文标签（含 /1/ 副本）', keys.includes('category/default/') && keys.includes('tag/安卓/') && keys.includes('tag/安卓/1/'));
 	check('旧 permalink 页面已生成', keys.includes('default/old-hello.html'));
 	check('feed 与 sitemap 已生成', keys.includes('feed/') && keys.includes('sitemap.xml'));
+	check(
+		'三个索引页已生成',
+		overviewKeys.every((key) => keys.includes(key)),
+		overviewKeys.filter((key) => !keys.includes(key)).join(',') || '(全在)',
+	);
 	check('草稿没有产出对象', !keys.some((key) => key.includes('draft-one')));
 	check('waiting 文章没有产出对象', !keys.includes('default/post-12.html'));
 
@@ -213,6 +283,59 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('首页缓存头按 §7.2', homeMeta?.cacheControl === 'public, max-age=60, stale-while-revalidate=300', String(homeMeta?.cacheControl));
 	const articleMeta = (await env.BUCKET.head('default/hello.html'))?.httpMetadata;
 	check('文章页缓存头按 §7.2', articleMeta?.cacheControl === 'public, max-age=300, stale-while-revalidate=600', String(articleMeta?.cacheControl));
+
+	// 主题资源流水线（§7.2）：指纹 key + immutable + 页面注入
+	const cssAsset = themeAsset('style.css');
+	const cssMeta = (await env.BUCKET.head(cssAsset.key))?.httpMetadata;
+	check('主题 CSS 按指纹写入 R2', keys.includes(cssAsset.key), cssAsset.key);
+	check(
+		'指纹 key 形态 = theme/<名>.<8 位 hex>.<扩展名>',
+		/^theme\/[a-z0-9-]+\.[0-9a-f]{8}\.(css|js)$/.test(cssAsset.key),
+		cssAsset.key,
+	);
+	check(
+		'主题资源是 immutable 长缓存',
+		cssMeta?.cacheControl === 'public, max-age=31536000, immutable',
+		String(cssMeta?.cacheControl),
+	);
+	check('主题资源 contentType 取清单里的值', cssMeta?.contentType === cssAsset.contentType, String(cssMeta?.contentType));
+	check(
+		'写进 R2 的 CSS 与源文件逐字一致',
+		(await (await env.BUCKET.get(cssAsset.key))?.text()) === cssAsset.content,
+	);
+	const jsAsset = themeAsset('app.js');
+	check('主题 JS 也进了 R2', keys.includes(jsAsset.key), jsAsset.key);
+	check(
+		'首页注入指纹 CSS link',
+		homeHtml.includes(`<link rel="stylesheet" href="${themeAssetPath('style.css')}">`),
+		themeAssetPath('style.css'),
+	);
+	check('首页注入 defer 脚本', homeHtml.includes(`<script src="${themeAssetPath('app.js')}" defer></script>`));
+	check(
+		'全站都不再有侧栏（顶栏导航取代，文章页也不再挂全局数据）',
+		!homeHtml.includes('class="sidebar"') && !categoryHtml.includes('class="sidebar"'),
+	);
+	check(
+		'顶栏导航含 分类 / 标签 / 归档 / 关于',
+		homeHtml.includes('<a href="/categories/">分类</a>') &&
+			homeHtml.includes('<a href="/tags/">标签</a>') &&
+			homeHtml.includes('<a href="/archives/">归档</a>') &&
+			homeHtml.includes('<a href="/about.html">关于</a>'),
+	);
+	check('列表页是限宽版式（`.layout-narrow`）', homeHtml.includes('<body class="layout-narrow">'));
+	check('列表页不再输出两栏骨架', !homeHtml.includes('site-body'));
+
+	const categoriesHtml = (await (await env.BUCKET.get('categories/'))?.text()) ?? '';
+	check(
+		'分类索引页列出分类与计数',
+		categoriesHtml.includes('<h1 class="archive-title">分类</h1>') &&
+			categoriesHtml.includes('href="/category/default/"') &&
+			categoriesHtml.includes('class="term-count"'),
+	);
+	const tagsHtml = (await (await env.BUCKET.get('tags/'))?.text()) ?? '';
+	check('标签索引页链接已编码（中文标签）', tagsHtml.includes('href="/tag/%E5%AE%89%E5%8D%93/"'));
+	const archivesHtml = (await (await env.BUCKET.get('archives/'))?.text()) ?? '';
+	check('归档索引页列出月份', archivesHtml.includes('<h1 class="archive-title">归档</h1>') && archivesHtml.includes('class="term-list"'));
 
 	const afterFull = await all<{ count: number }>("SELECT COUNT(*) AS count FROM contents WHERE needs_sync = 1 AND status = 'publish'");
 	check('publishAll 后 needs_sync 清零', afterFull[0].count === 0, `剩余 ${afterFull[0].count}`);
@@ -250,8 +373,32 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('页面里不存在 href="javascript', !articleHtml.includes('href="javascript'));
 	check('标题里的 <script> 被处理', !articleHtml.includes('<script>alert(9)</script>'));
 	check('代码块保留', articleHtml.includes('<pre><code'));
+	check('围栏语言留在 class 上（客户端高亮的入口）', articleHtml.includes('class="language-js"'));
 	check('中文标签链接已编码', articleHtml.includes('/tag/%E5%AE%89%E5%8D%93/'));
 	check('文章页显示标签名', articleHtml.includes('>安卓</a>'));
+	check('文章页同样注入指纹 CSS link', articleHtml.includes(themeAssetPath('style.css')));
+	check(
+		'文章页骨架完整（顶栏导航 + 主题切换按钮 + 尾部脚本）',
+		articleHtml.includes('<body class="layout-post">') &&
+			articleHtml.includes('<a href="/categories/">分类</a>') &&
+			articleHtml.includes('data-theme-toggle') &&
+			articleHtml.includes(`<script src="${themeAssetPath('app.js')}" defer></script>`),
+	);
+	check('文章页不再有侧栏', !articleHtml.includes('class="sidebar"'));
+	// 目录是**服务端**抽取的（theme/toc.ts）：锚点 id 与目录链接在同一次渲染里产生
+	check('正文 h2/h3 被注入锚点 id', articleHtml.includes('<h2 id="二级标题">') && articleHtml.includes('<h3 id="三级标题">'));
+	check('重复标题的锚点 id 会去重', articleHtml.includes('<h2 id="二级标题-2">'));
+	check(
+		'宽屏右栏目录由服务端渲染',
+		articleHtml.includes('<aside class="post-toc" aria-label="文章目录">') &&
+			articleHtml.includes('href="#二级标题"') &&
+			articleHtml.includes('href="#三级标题"') &&
+			articleHtml.includes('href="#二级标题-2"'),
+	);
+	check(
+		'窄屏折叠目录用原生 details（不依赖 JS）',
+		articleHtml.includes('<details class="post-toc-inline">') && articleHtml.includes('<summary>目录</summary>'),
+	);
 
 	const row = await all<{ excerpt: string; words: number; needs_sync: number }>(
 		'SELECT excerpt, words, needs_sync FROM contents WHERE cid = 100',
@@ -337,6 +484,11 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('页面 needs_sync 已清零', pageRow[0].needs_sync === 0);
 	const pageHtml = (await (await env.BUCKET.get('about.html'))?.text()) ?? '';
 	check('页面对象已重建且有正文', pageHtml.includes('这是关于页面'));
+	// 独立页面只有 `# 关于` 一个 h1，没有 h2/h3 —— 不该出现空目录栏
+	check(
+		'没有 h2/h3 的页面不渲染目录',
+		!pageHtml.includes('<aside class="post-toc"') && !pageHtml.includes('post-toc-inline'),
+	);
 
 	// -----------------------------------------------------------------------
 	// 7. 删除文章
@@ -483,6 +635,10 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('sitemap 不含归档 /1/ 副本', !/category\/default\/1\//.test(sitemap));
 	check('sitemap 不含旧 permalink', !sitemap.includes('old-hello'));
 	check('sitemap 是绝对 URL', sitemap.includes('https://blog.fengqi.me/'));
+	check(
+		'sitemap 收录三个索引页',
+		['categories/', 'tags/', 'archives/'].every((section) => sitemap.includes(`https://blog.fengqi.me/${section}`)),
+	);
 	check('feed 里带上了补渲染的正文', feed.includes('未来的文章'));
 	// 只看 item 级的 description（channel 级的站点描述为空是配置问题，不是 bug）
 	const feedItems = feed.split('<item>').slice(1);

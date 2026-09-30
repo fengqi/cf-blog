@@ -51,5 +51,7 @@ export function renderArchive(context: ArchiveContext): string {
 		title: page > 1 ? `${title} - 第 ${page} 页` : title,
 		canonicalPath: context.canonicalPath,
 		nav: context.nav,
+		// 归档页也是纯列表：限宽居中
+		width: 'narrow',
 	});
 }

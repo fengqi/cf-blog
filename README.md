@@ -26,6 +26,8 @@
 
 ```
 theme/            前台主题（字符串模板，发布时渲染后写入 R2）
+  assets/         CSS / JS 源文件 —— 由 build:assets 打指纹后写入 R2 的 theme/
+  assets.ts       资源访问器（路径、<link>、<script> 标签）
 src/
   routes/         后台路由
   views/          后台页面组件（Hono JSX，.tsx）
@@ -34,7 +36,7 @@ src/
   lib/            D1 / R2 / markdown / 认证 / URL 映射的封装
 migrations/       D1 迁移（wrangler 默认目录，无需额外配置）
 docs/             设计文档与建表脚本
-scripts/          一次性脚本（Typecho 迁移、密码哈希）
+scripts/          一次性脚本（Typecho 迁移、密码哈希、主题资源构建）
 ```
 
 ## 本地开发
@@ -43,11 +45,16 @@ scripts/          一次性脚本（Typecho 迁移、密码哈希）
 npm install
 npm run dev          # 本地跑 Worker；D1 走本地 SQLite，不消耗线上额度
 npm run typecheck    # tsc --noEmit，提交前跑一下
+npm run build:assets # 改了 theme/assets/ 之后必须跑：重新算指纹，产出 assets.generated.ts
 npm run bench:render # 渲染压测（合成 120 篇文章，不连数据库/R2），见 design.md §13.1 #4
 npm run cf-typegen   # 改了 wrangler.jsonc 的绑定之后必须重跑，否则 c.env.xxx 没有类型
 npm run deploy       # 手动部署（不碰数据库）
-npm run deploy:ci    # 应用 D1 迁移 + 部署（Workers Builds 用的就是这个）
+npm run deploy:ci    # 构建主题资源 + 应用 D1 迁移 + 部署（Workers Builds 用的就是这个）
 ```
+
+> **主题资源是带指纹的**（`theme/style.<hash>.css`，缓存头 `immutable`）：改了
+> `theme/assets/` 下的文件却不跑 `build:assets`，页面里的 `<link>` 仍指向旧指纹，
+> 样式不会更新。改完资源要 **构建 → 全站重渲**，两步都不能省（design.md §7.2）。
 
 ### 本地端到端验证
 
@@ -59,7 +66,7 @@ npx wrangler dev -c wrangler.e2e.jsonc --port 8788    # 另开一个终端
 curl -s http://127.0.0.1:8788/ | tail -3              # 看到「全部通过」即 OK
 ```
 
-断言集在 `scripts/e2e-runner.ts`（68 项）。`wrangler.e2e.jsonc` 只给本地用，**不要拿它部署**。
+断言集在 `scripts/e2e-runner.ts`（121 项）。`wrangler.e2e.jsonc` 只给本地用，**不要拿它部署**。
 （`wrangler dev` 需要写 `~/.wrangler/registry`，在受限沙箱里跑不起来。）
 
 ## 后台
@@ -110,7 +117,7 @@ wrangler secret put TURNSTILE_SECRET
 | 构建命令 | `npm ci` |
 | 部署命令 | `npm run deploy:ci` |
 
-`deploy:ci` 定义在 `package.json` 里，内容是「先应用 D1 迁移，再 `npm run deploy`」——
+`deploy:ci` 定义在 `package.json` 里，内容是「构建主题资源 → 应用 D1 迁移 → `npm run deploy`」——
 部署逻辑跟着代码走，可 review、可 diff，不散落在控制台的输入框里。
 
 之后 push 到 `master` 自动构建 + 部署，构建日志在 **Worker → Deployments** 里看。
@@ -140,7 +147,9 @@ wrangler secret put TURNSTILE_SECRET
 
 ## 两套渲染机制
 
-- **`theme/`（`.ts`）**：前台主题，纯字符串拼接，发布时渲染完写进 R2。**必须零依赖**，因为它要在发布流水线里裸跑
+- **`theme/`（`.ts`）**：前台主题，纯字符串拼接，发布时渲染完写进 R2。**必须零依赖**，因为它要在发布流水线里裸跑。
+  同目录下的 `theme/assets/` 是 CSS/JS 源文件，不参与上面的字符串拼接 —— 它由 `build:assets`
+  打指纹后作为**独立对象**写进 R2，页面里只留一个 `<link>` / `<script>`（design.md §7.2）
 - **`src/views/`（`.tsx`）**：后台页面，Hono JSX，直接当 HTTP 响应返回
 
 不要互相串用。后台 JSX 另有两条规定：只 import `hono/jsx`（不用 `hono/jsx/dom`）；唯一的转义出口 `dangerouslySetInnerHTML` 只允许用在文章正文。

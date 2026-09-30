@@ -13,7 +13,7 @@
  *  - Free 版 Edge Cache TTL 最低 2 小时，别指望把边缘缓存压到几分钟
  */
 
-export type ObjectKind = 'post' | 'index' | 'archive' | 'feed' | 'sitemap' | 'asset';
+export type ObjectKind = 'post' | 'index' | 'overview' | 'archive' | 'feed' | 'sitemap' | 'asset';
 
 /** 一个待写入 R2 的文本对象 */
 export interface RenderedObject {
@@ -29,6 +29,8 @@ export const HTML_CONTENT_TYPE = 'text/html; charset=utf-8';
 export const CACHE_CONTROL: Record<ObjectKind, string> = {
 	post: 'public, max-age=300, stale-while-revalidate=600',
 	index: 'public, max-age=60, stale-while-revalidate=300',
+	// 索引页只在发布时变（计数），介于列表页与文章页之间取 300
+	overview: 'public, max-age=300',
 	archive: 'public, max-age=120',
 	feed: 'public, max-age=600',
 	sitemap: 'public, max-age=600',

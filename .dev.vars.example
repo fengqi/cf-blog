@@ -1,0 +1,10 @@
+# 本地开发密钥模板：复制成 .dev.vars 后按需改（.dev.vars 已被 gitignore，不会入库）
+#
+# 线上对应关系：
+#   wrangler secret put SESSION_SECRET     # 会话签名密钥（必填，缺了登录直接失败）
+#   wrangler secret put IP_SALT            # 登录失败限流的 IP 哈希盐
+#   wrangler secret put TURNSTILE_SECRET   # 想强制人机校验就配上，同时要配 options.turnstile_site_key
+#
+# 生成一个随机值：openssl rand -base64 32
+SESSION_SECRET=dev-only-session-secret-not-for-production
+IP_SALT=dev-only-ip-salt

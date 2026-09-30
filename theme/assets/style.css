@@ -1,0 +1,822 @@
+/**
+ * 前台主题样式 —— 设计文档 §7.2 / §11
+ *
+ * 四条纪律：
+ *   1. **零外部请求**。不 @import、不引字体 CDN、不引图片 —— 字体走系统栈。
+ *   2. **暗色只重定义变量**。主题色全在 `:root` 的 CSS 变量里，
+ *      暗色唯一的不同就是那两块变量重定义（刻意重复两次，见下面的说明）。
+ *   3. 本文件由 `npm run build:assets` 打指纹后写入 R2 的 `theme/style.<hash>.css`，
+ *      页面里的 `<link>` 由 `theme/layout.ts` 注入。**别手改 R2 上的对象**。
+ *   4. 该对象缓存头是 `immutable`（§7.2），改了内容必须重跑 build:assets 让 hash 变
+ *      —— 只改文件不重跑构建，老浏览器会一直吃旧 CSS。
+ *
+ * 类名与 `theme/` 目录下各个 .ts 模板输出的结构一一对应，改结构时一起改。
+ */
+
+/* ==========================================================================
+   1. 设计变量
+   ========================================================================== */
+
+:root {
+	/* 中性色 */
+	--bg: #ffffff;
+	--bg-soft: #f6f7f9;
+	--border: #e4e7eb;
+	--border-strong: #d3d8de;
+	--text: #1f2328;
+	--text-soft: #4a5259;
+	--text-muted: #79838d;
+
+	/* 强调色（链接、hover、标签） */
+	--accent: #1a63c8;
+	--accent-hover: #114a99;
+
+	/* 代码 */
+	--code-bg: #f6f8fa;
+	--code-text: #24292f;
+	--tok-com: #6a737d;
+	--tok-str: #0a3069;
+	--tok-num: #0550ae;
+	--tok-key: #cf222e;
+
+	/* 排版 */
+	--font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC",
+		"Hiragino Sans GB", "Microsoft YaHei", "Source Han Sans SC", sans-serif;
+	--font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+		"Liberation Mono", "Courier New", monospace;
+
+	--radius: 8px;
+	--radius-sm: 4px;
+	--container: 1080px;
+	--content-size: 1.0625rem; /* 17px：中文正文的舒适字号 */
+	--content-leading: 1.85;
+
+	/* 主题切换按钮的图标：暗色态换成月亮 */
+	--theme-toggle-icon: "\2600"; /* ☀ */
+
+	color-scheme: light;
+}
+
+/**
+ * 暗色变量刻意写了**两块**：
+ *   - 第一块给「系统是暗色且用户没手动选过」的访客（`data-theme` 由内联脚本按
+ *     localStorage 设置，没有它就说明没手动选过）。这样**没有 JS 也能进暗色**。
+ *   - 第二块给「用户手动点了切换按钮」的情况。
+ * CSS 没法把变量重定义同时挂在媒体查询和属性选择器上，只能重复一遍 ——
+ * 改这里务必两块一起改。
+ */
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--bg: #14171b;
+		--bg-soft: #1b1f24;
+		--border: #2b3138;
+		--border-strong: #3a424b;
+		--text: #e3e6e9;
+		--text-soft: #b6bcc3;
+		--text-muted: #8b949e;
+		--accent: #6cb0ff;
+		--accent-hover: #93c5fd;
+		--code-bg: #161b21;
+		--code-text: #dfe4ea;
+		--tok-com: #8b949e;
+		--tok-str: #a5d6ff;
+		--tok-num: #79c0ff;
+		--tok-key: #ff7b72;
+		--theme-toggle-icon: "\263E"; /* ☾ */
+		color-scheme: dark;
+	}
+}
+
+:root[data-theme="dark"] {
+	--bg: #14171b;
+	--bg-soft: #1b1f24;
+	--border: #2b3138;
+	--border-strong: #3a424b;
+	--text: #e3e6e9;
+	--text-soft: #b6bcc3;
+	--text-muted: #8b949e;
+	--accent: #6cb0ff;
+	--accent-hover: #93c5fd;
+	--code-bg: #161b21;
+	--code-text: #dfe4ea;
+	--tok-com: #8b949e;
+	--tok-str: #a5d6ff;
+	--tok-num: #79c0ff;
+	--tok-key: #ff7b72;
+	--theme-toggle-icon: "\263E"; /* ☾ */
+	color-scheme: dark;
+}
+
+/* ==========================================================================
+   2. 基础
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html {
+	-webkit-text-size-adjust: 100%;
+}
+
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--text);
+	font-family: var(--font-sans);
+	font-size: var(--content-size);
+	line-height: var(--content-leading);
+	/* 中文正文更耐看：字距不加，行高已经放开 */
+	text-rendering: optimizeLegibility;
+	-webkit-font-smoothing: antialiased;
+}
+
+a {
+	color: var(--accent);
+	text-decoration: none;
+}
+
+a:hover {
+	color: var(--accent-hover);
+	text-decoration: underline;
+}
+
+img {
+	max-width: 100%;
+	height: auto;
+}
+
+hr {
+	border: 0;
+	border-top: 1px solid var(--border);
+	margin: 2.25rem 0;
+}
+
+:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+	border-radius: var(--radius-sm);
+}
+
+.container {
+	width: 100%;
+	max-width: var(--container);
+	margin: 0 auto;
+	padding: 0 1.25rem;
+}
+
+/* ==========================================================================
+   3. 页头 / 页脚
+   ========================================================================== */
+
+.site-header {
+	border-bottom: 1px solid var(--border);
+	background: var(--bg);
+	padding: 1.5rem 0;
+}
+
+.site-header-inner {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 0.5rem 1.25rem;
+}
+
+.site-brand {
+	margin-right: auto;
+	min-width: 0;
+}
+
+.site-title {
+	margin: 0;
+	font-size: 1.5rem;
+	line-height: 1.3;
+	font-weight: 700;
+	letter-spacing: -0.01em;
+}
+
+.site-title a {
+	color: var(--text);
+}
+
+.site-title a:hover {
+	color: var(--accent);
+	text-decoration: none;
+}
+
+.site-description {
+	margin: 0.25rem 0 0;
+	color: var(--text-muted);
+	font-size: 0.875rem;
+	line-height: 1.5;
+}
+
+.site-nav {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem 1.1rem;
+	font-size: 0.9375rem;
+}
+
+.site-nav a {
+	color: var(--text-soft);
+}
+
+.site-nav a:hover {
+	color: var(--accent);
+	text-decoration: none;
+}
+
+/* 主题切换：按钮本身由内联脚本加的 `.js` 控制显隐 —— 没有 JS 就别显示死按钮 */
+.theme-toggle {
+	display: none;
+	align-items: center;
+	justify-content: center;
+	width: 2rem;
+	height: 2rem;
+	padding: 0;
+	border: 1px solid var(--border);
+	border-radius: 50%;
+	background: var(--bg-soft);
+	color: var(--text-muted);
+	font-size: 0.9375rem;
+	line-height: 1;
+	cursor: pointer;
+	transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.js .theme-toggle {
+	display: inline-flex;
+}
+
+.theme-toggle::before {
+	content: var(--theme-toggle-icon);
+}
+
+.theme-toggle:hover {
+	border-color: var(--border-strong);
+	color: var(--accent);
+}
+
+.site-footer {
+	border-top: 1px solid var(--border);
+	margin-top: 4rem;
+	padding: 1.75rem 0 2.5rem;
+	color: var(--text-muted);
+	font-size: 0.875rem;
+}
+
+.site-footer p {
+	margin: 0;
+}
+
+/* ==========================================================================
+   4. 主体与容器宽度
+   ========================================================================== */
+
+/*
+ * 容器宽度按页面类型分档（body 上的类，来自 theme/layout.ts 的 `width` 选项）：
+ *   .layout-narrow 44rem —— 首页 / 分页 / 归档 / 索引页。这些页面只有列表，
+ *                          按 1080px 渲染的话中文摘要一行能塞六十多个字，读起来很累。
+ *   .layout-post   62rem —— 文章页。宽度留给「正文 + 右侧目录」两栏，
+ *                          正文自己再收窄到 42rem（见 `.post-body`）。
+ * 页头 / 页脚跟着一起收 —— 只有正文收窄、页头仍铺满，视觉上会像错位。
+ */
+.layout-narrow .container {
+	max-width: 44rem;
+}
+
+.layout-post .container {
+	max-width: 62rem;
+}
+
+.site-main {
+	margin-top: 2.5rem;
+	min-width: 0;
+}
+
+/* ==========================================================================
+   5. 文章列表与分页器
+   ========================================================================== */
+
+.post-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.post-item {
+	padding-bottom: 1.75rem;
+	margin-bottom: 1.75rem;
+	border-bottom: 1px solid var(--border);
+}
+
+.post-item:last-child {
+	border-bottom: 0;
+	margin-bottom: 0;
+}
+
+.post-item-title {
+	margin: 0 0 0.5rem;
+	font-size: 1.3125rem;
+	line-height: 1.45;
+	font-weight: 650;
+}
+
+.post-item-title a {
+	color: var(--text);
+}
+
+.post-item-title a:hover {
+	color: var(--accent);
+	text-decoration: none;
+}
+
+.post-meta {
+	margin: 0;
+	color: var(--text-muted);
+	font-size: 0.875rem;
+	line-height: 1.7;
+}
+
+.post-meta > * + *::before {
+	content: "·";
+	margin: 0 0.5rem;
+	color: var(--border-strong);
+}
+
+.post-excerpt {
+	margin: 0.6rem 0 0;
+	color: var(--text-soft);
+	font-size: 0.9375rem;
+	line-height: 1.8;
+}
+
+.post-empty {
+	color: var(--text-muted);
+	text-align: center;
+	padding: 3rem 0;
+}
+
+.pagination {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 1rem;
+	margin-top: 2.5rem;
+	font-size: 0.9375rem;
+}
+
+.pagination a {
+	padding: 0.35rem 0.9rem;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	color: var(--text-soft);
+}
+
+.pagination a:hover {
+	border-color: var(--accent);
+	color: var(--accent);
+	text-decoration: none;
+}
+
+.page-status {
+	color: var(--text-muted);
+}
+
+/* ==========================================================================
+   6. 文章页：正文 + 右侧目录
+   ========================================================================== */
+
+/*
+ * 目录在 HTML 里出现**两遍**（宽屏右栏 `<aside>` / 窄屏 `<details>`），
+ * 这里按 62rem 断点二选一 —— 显隐完全由 CSS 决定，不需要任何 JS。
+ * 为什么不只用一份：`<details>` 的展开由 `open` 属性控制，CSS 盖不住它，
+ * 想「宽屏强制展开」就得靠 JS 搬 DOM，那还不如两份静态 HTML 来得可靠。
+ */
+.post-layout {
+	display: grid;
+	gap: 3rem;
+	align-items: start;
+}
+
+.post-body {
+	/* 中文正文的舒适行宽。有目录时≈网格第一栏，没目录时它自己把正文收住 */
+	max-width: 42rem;
+	margin-inline: auto;
+	min-width: 0;
+}
+
+.post-title {
+	margin: 0 0 0.75rem;
+	font-size: 1.75rem;
+	line-height: 1.4;
+	font-weight: 700;
+	letter-spacing: -0.01em;
+}
+
+.post-content {
+	margin-top: 2rem;
+}
+
+.post-nav {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	margin-top: 2.5rem;
+	padding-top: 1.5rem;
+	border-top: 1px solid var(--border);
+	color: var(--text-muted);
+	font-size: 0.9375rem;
+}
+
+/* --- 目录 --- */
+
+.post-toc {
+	font-size: 0.875rem;
+	line-height: 1.6;
+}
+
+.post-toc-title {
+	margin: 0 0 0.75rem;
+	padding-bottom: 0.4rem;
+	border-bottom: 1px solid var(--border);
+	font-size: 0.9375rem;
+	font-weight: 650;
+	color: var(--text);
+}
+
+.toc-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.toc-item {
+	margin: 0.3rem 0;
+}
+
+.toc-level-3 {
+	padding-left: 1rem;
+}
+
+.toc-list a {
+	display: block;
+	color: var(--text-soft);
+}
+
+.toc-list a:hover {
+	color: var(--accent);
+	text-decoration: none;
+}
+
+/* 滚动高亮：滚动监听在 theme/assets/app.js 里打这个类；没 JS 就只是普通链接 */
+.toc-list a.is-active {
+	color: var(--accent);
+	font-weight: 600;
+}
+
+/* --- 窄屏的折叠目录（放在正文之前，跟着文章走） --- */
+
+.post-toc-inline {
+	margin: 1.75rem 0 0;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--bg-soft);
+	font-size: 0.9375rem;
+}
+
+.post-toc-inline > summary {
+	padding: 0.6rem 1rem;
+	color: var(--text-soft);
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.post-toc-inline .toc-list {
+	padding: 0 1rem 0.75rem;
+}
+
+/* ==========================================================================
+   7. 正文排版（.post-content 里的东西）
+   ========================================================================== */
+
+.post-content > *:first-child {
+	margin-top: 0;
+}
+
+.post-content > *:last-child {
+	margin-bottom: 0;
+}
+
+.post-content p,
+.post-content ul,
+.post-content ol,
+.post-content dl,
+.post-content blockquote,
+.post-content pre,
+.post-content table,
+.post-content figure {
+	margin: 0 0 1.4rem;
+}
+
+.post-content h1,
+.post-content h2,
+.post-content h3,
+.post-content h4,
+.post-content h5,
+.post-content h6 {
+	margin: 2.25rem 0 0.9rem;
+	line-height: 1.4;
+	font-weight: 650;
+	/* 从目录跳过来时别把标题顶在视口最上沿 */
+	scroll-margin-top: 1.5rem;
+}
+
+.post-content h1 {
+	font-size: 1.5rem;
+}
+
+.post-content h2 {
+	font-size: 1.3125rem;
+	padding-bottom: 0.4rem;
+	border-bottom: 1px solid var(--border);
+}
+
+.post-content h3 {
+	font-size: 1.125rem;
+}
+
+.post-content h4,
+.post-content h5,
+.post-content h6 {
+	font-size: 1rem;
+}
+
+.post-content ul,
+.post-content ol {
+	padding-left: 1.6rem;
+}
+
+.post-content li {
+	margin: 0.35rem 0;
+}
+
+.post-content li > ul,
+.post-content li > ol {
+	margin: 0.35rem 0;
+}
+
+.post-content blockquote {
+	padding: 0.25rem 0 0.25rem 1.1rem;
+	border-left: 3px solid var(--border);
+	color: var(--text-soft);
+}
+
+.post-content blockquote > *:last-child {
+	margin-bottom: 0;
+}
+
+.post-content a {
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+
+.post-content img {
+	display: block;
+	margin: 1.5rem auto;
+	border-radius: var(--radius-sm);
+}
+
+.post-content figure {
+	margin-inline: 0;
+}
+
+.post-content figcaption {
+	margin-top: 0.5rem;
+	color: var(--text-muted);
+	font-size: 0.875rem;
+	text-align: center;
+}
+
+/* 存量老文章里的 <font color> 是历史样式，保留但别让它撑破行距 */
+.post-content font {
+	line-height: inherit;
+}
+
+/* 表格：宽表允许横向滚动，别把页面撑爆 */
+.post-content table {
+	display: block;
+	width: 100%;
+	max-width: 100%;
+	overflow-x: auto;
+	border-collapse: collapse;
+	font-size: 0.9375rem;
+}
+
+.post-content th,
+.post-content td {
+	border: 1px solid var(--border);
+	padding: 0.5rem 0.75rem;
+	text-align: left;
+	vertical-align: top;
+}
+
+.post-content th {
+	background: var(--bg-soft);
+	font-weight: 600;
+}
+
+/* ==========================================================================
+   8. 代码
+   ========================================================================== */
+
+.post-content code {
+	font-family: var(--font-mono);
+	font-size: 0.9em;
+	background: var(--code-bg);
+	color: var(--code-text);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 0.12em 0.35em;
+	/* 长串（URL、token）不要撑破正文 */
+	word-break: break-word;
+}
+
+.post-content pre {
+	background: var(--code-bg);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: 0.9rem 1.05rem;
+	overflow-x: auto;
+	/* 单行过长时横向滚动，别折行糟蹋代码 */
+	line-height: 1.65;
+}
+
+.post-content pre code {
+	display: block;
+	background: none;
+	border: 0;
+	border-radius: 0;
+	padding: 0;
+	font-size: 0.875rem;
+	white-space: pre;
+	word-break: normal;
+}
+
+/* 语法高亮的 token 颜色（暗色下换一套，见 §1）。由 theme/assets/app.js 生成 */
+.tok-com {
+	color: var(--tok-com);
+	font-style: italic;
+}
+
+.tok-str {
+	color: var(--tok-str);
+}
+
+.tok-num {
+	color: var(--tok-num);
+}
+
+.tok-key {
+	color: var(--tok-key);
+}
+
+/* ==========================================================================
+   9. 术语清单（/categories/、/tags/、/archives/）
+   ========================================================================== */
+
+/*
+ * 这三个页面承接了原来侧栏的「浏览入口」，但形态是**整页清单** ——
+ * 不再有 17rem 宽的栏去硬塞 198 个标签和 58 个月份，也就不需要限高滚动条。
+ */
+
+.term-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.term-item {
+	padding: 0.75rem 0;
+	border-bottom: 1px solid var(--border);
+}
+
+.term-item:last-child {
+	border-bottom: 0;
+}
+
+.term-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 1rem;
+}
+
+.term-head a {
+	color: var(--text);
+	font-size: 1.0625rem;
+}
+
+.term-head a:hover {
+	color: var(--accent);
+	text-decoration: none;
+}
+
+.term-count {
+	flex: none;
+	color: var(--text-muted);
+	font-size: 0.875rem;
+	font-variant-numeric: tabular-nums;
+}
+
+.term-description {
+	margin: 0.35rem 0 0;
+	color: var(--text-muted);
+	font-size: 0.875rem;
+	line-height: 1.7;
+}
+
+/* ==========================================================================
+   10. 归档页
+   ========================================================================== */
+
+.archive-title {
+	margin: 0 0 0.5rem;
+	font-size: 1.5rem;
+	line-height: 1.4;
+	font-weight: 700;
+}
+
+.archive-description {
+	margin: 0 0 2rem;
+	color: var(--text-muted);
+	font-size: 0.9375rem;
+}
+
+.archive-title + .post-list,
+.archive-title + .term-list {
+	margin-top: 1.75rem;
+}
+
+/* ==========================================================================
+   11. 响应式
+   ========================================================================== */
+
+/* 宽屏：目录固定在右栏，正文里的折叠目录收起来 */
+@media (min-width: 62.01rem) {
+	.post-layout--with-toc {
+		grid-template-columns: minmax(0, 1fr) 14rem;
+	}
+
+	.post-toc {
+		position: sticky;
+		top: 2rem;
+	}
+
+	.post-toc-inline {
+		display: none;
+	}
+}
+
+/* 窄屏：右栏目录整个不出现，改看正文里的 `<details>` */
+@media (max-width: 62rem) {
+	.post-toc {
+		display: none;
+	}
+}
+
+@media (max-width: 40rem) {
+	:root {
+		--content-size: 1rem;
+	}
+
+	.site-header {
+		padding: 1.25rem 0;
+	}
+
+	.site-title {
+		font-size: 1.3125rem;
+	}
+
+	.post-title {
+		font-size: 1.4375rem;
+	}
+
+	.post-item-title {
+		font-size: 1.1875rem;
+	}
+
+	.site-main {
+		margin-top: 1.75rem;
+	}
+}
+
+/* 用户明确要求减少动效时，关掉过渡 */
+@media (prefers-reduced-motion: reduce) {
+	* {
+		transition: none !important;
+	}
+}

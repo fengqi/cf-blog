@@ -47,7 +47,7 @@ import {
 } from '../publish/attachments';
 import { deleteObjects, deletePost, publishPost, rebuildTargetsSlice } from '../publish/pipeline';
 import { reconcileNeedsSync } from '../publish/sync';
-import { hasUrl, postKeyOf } from '../publish/targets';
+import { hasUrl, postKeyOf, TARGET_GROUPS, type TargetGroup } from '../publish/targets';
 import { CategoriesPage } from '../views/categories';
 import { ChangePasswordPage } from '../views/password';
 import { MediaLibraryPage } from '../views/media';
@@ -703,10 +703,20 @@ adminRoutes.post('/admin/rebuild/full', async (c) => {
 	const form = await c.req.formData().catch(() => null);
 	const offset = Number.parseInt(String(form?.get('offset') ?? c.req.query('offset') ?? '0'), 10);
 	const limit = Number.parseInt(String(form?.get('limit') ?? c.req.query('limit') ?? '50'), 10);
+	// 可选 group：只渲染某一组对象（渲染维护页的独立按钮）；缺省 = 全站
+	const group = String(form?.get('group') ?? c.req.query('group') ?? '');
+	let groups: Set<string> | undefined;
+	if (group) {
+		if (!TARGET_GROUPS.includes(group as TargetGroup)) {
+			return c.json({ error: `未知分组：${group}` }, 400);
+		}
+		groups = new Set([group]);
+	}
 	const report = await rebuildTargetsSlice(
 		c.env,
 		Number.isFinite(offset) && offset > 0 ? offset : 0,
 		Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 50,
+		groups,
 	);
 	return c.json(report);
 });

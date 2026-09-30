@@ -253,6 +253,10 @@ form.stack .actions button[type=submit]:hover {
 .render-block .actions { margin-top: 0.75rem; }
 .badge.dirty:hover { text-decoration: none; filter: brightness(1.1); }
 
+/* 分组独立渲染的一排小按钮 */
+.group-buttons { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.6rem; }
+.group-buttons button { padding: 0.25rem 0.7rem; font-size: 0.8438rem; font-weight: 400; }
+
 /* --- 登录页 --- */
 
 .login {

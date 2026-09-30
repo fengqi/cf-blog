@@ -300,3 +300,65 @@ function dedupeByKey(targets: Target[]): Target[] {
 	}
 	return result;
 }
+
+/**
+ * 渲染维护页的**独立渲染分组**（§6.5）：一组 = 一类可以单独重渲的对象。
+ *
+ * `kind` 本身已经接近这个划分，只有一点例外：分类归档和标签归档共用
+ * `kind: 'archive'`，靠 `term.type` 拆开 —— 两者的 URL 段和清单页都不同，
+ * 改分类 slug 没理由连 200 个标签归档一起重写。
+ */
+export type TargetGroup =
+	| 'assets'
+	| 'index'
+	| 'overview'
+	| 'posts'
+	| 'pages'
+	| 'categories'
+	| 'tags'
+	| 'months'
+	| 'feed'
+	| 'sitemap';
+
+export function targetGroup(target: Target): TargetGroup {
+	switch (target.kind) {
+		case 'asset':
+			return 'assets';
+		case 'index':
+			return 'index';
+		case 'overview':
+			return 'overview';
+		case 'post':
+			return 'posts';
+		case 'page':
+			return 'pages';
+		case 'archive':
+			return target.term.type === 'category' ? 'categories' : 'tags';
+		case 'month':
+			return 'months';
+		case 'feed':
+			return 'feed';
+		case 'sitemap':
+			return 'sitemap';
+	}
+}
+
+/** 渲染维护页按这个顺序展示分组按钮 */
+export const TARGET_GROUPS: readonly TargetGroup[] = [
+	'assets',
+	'index',
+	'overview',
+	'posts',
+	'pages',
+	'categories',
+	'tags',
+	'months',
+	'feed',
+	'sitemap',
+];
+
+/** 把全站清单按分组过滤；不传 groups = 全部（全站渲染） */
+export function filterTargetsByGroups(targets: Target[], groups?: ReadonlySet<string>): Target[] {
+	if (!groups || groups.size === 0) return targets;
+	return targets.filter((target) => groups.has(targetGroup(target)));
+}

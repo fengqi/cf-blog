@@ -40,6 +40,7 @@ import { loadSnapshot } from './snapshot';
 import {
 	contentDeleteKeys,
 	contentPublishTargets,
+	filterTargetsByGroups,
 	postDeleteTargets,
 	postKeyOf,
 	postPublishTargets,
@@ -279,9 +280,10 @@ export async function rebuildTargetsSlice(
 	env: PublishEnv,
 	offset = 0,
 	limit = 50,
+	groups?: ReadonlySet<string>,
 ): Promise<{ total: number; offset: number; written: number; failed: string[]; nextOffset: number | null }> {
 	const { snapshot } = await loadSnapshot(env, 'publish:slice');
-	const targets = siteTargets(snapshot);
+	const targets = filterTargetsByGroups(siteTargets(snapshot), groups);
 	const slice = targets.slice(offset, offset + limit);
 	const objects = renderTargets(snapshot, slice);
 	const outcome = await writeObjects(env.BUCKET, objects);

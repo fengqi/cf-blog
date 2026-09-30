@@ -29,6 +29,22 @@ export function RenderPage(props: RenderPageProps) {
 					无条件重写 R2 上全部对象（文章页、分页、归档、索引页、feed、sitemap、主题资源，约 800 个）。
 					改了模板、样式、站点设置之后用；不看「待同步」标记，跑完计数也不变。
 				</p>
+				<p class="hint" style="margin-top:0.75rem">
+					只改了某一类东西的话，可以单独渲染对应分组：
+				</p>
+				<div class="group-buttons">
+					<button type="button" data-group="assets">主题资源</button>
+					<button type="button" data-group="index">首页与分页</button>
+					<button type="button" data-group="overview">索引清单页</button>
+					<button type="button" data-group="posts">文章页</button>
+					<button type="button" data-group="pages">独立页面</button>
+					<button type="button" data-group="categories">分类归档</button>
+					<button type="button" data-group="tags">标签归档</button>
+					<button type="button" data-group="months">月份归档</button>
+					<button type="button" data-group="feed">Feed</button>
+					<button type="button" data-group="sitemap">Sitemap</button>
+				</div>
+				<span id="group-progress" class="hint" role="status" />
 				<div class="actions">
 					<button type="button" id="full-start">
 						开始全站渲染
@@ -123,6 +139,36 @@ document.addEventListener('DOMContentLoaded', function () {
         };
       });
     };
+  });
+
+  // 分组独立渲染：同一端点带 group 参数，一次渲染一类对象
+  var groupButtons = Array.prototype.slice.call(document.querySelectorAll('.group-buttons [data-group]'));
+  var groupProgress = document.getElementById('group-progress');
+  groupButtons.forEach(function (groupButton) {
+    groupButton.addEventListener('click', function () {
+      var group = groupButton.getAttribute('data-group');
+      var name = groupButton.textContent;
+      groupButtons.forEach(function (b) { b.disabled = true; });
+      var offset = 0;
+      var written = 0;
+      function run() {
+        return post('/admin/rebuild/full', { offset: String(offset), limit: '50', group: group }).then(function (report) {
+          offset = report.nextOffset === null ? 0 : report.nextOffset;
+          written += report.written;
+          groupProgress.textContent = '渲染' + name + '中… ' + written + ' / ' + report.total;
+          if (report.nextOffset !== null) return run();
+        });
+      }
+      run()
+        .then(function () {
+          groupProgress.textContent = name + '渲染完成：' + written + ' 个对象';
+          groupButtons.forEach(function (b) { b.disabled = false; });
+        })
+        .catch(function (error) {
+          groupProgress.textContent = name + '渲染失败：' + error.message + '（可重跑）';
+          groupButtons.forEach(function (b) { b.disabled = false; });
+        });
+    });
   });
 
   // 阶段二：/admin/rebuild/batch 每轮磨 20 篇，直到 needsSync = 0

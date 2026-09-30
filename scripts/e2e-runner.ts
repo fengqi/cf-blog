@@ -600,6 +600,20 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 			renderHtml.includes('/admin/rebuild/full') &&
 			renderHtml.includes('/admin/rebuild/batch'),
 	);
+	check(
+		'渲染页带分组独立渲染按钮（含分类/标签拆分）',
+		renderHtml.includes('data-group="categories"') && renderHtml.includes('data-group="tags"') && renderHtml.includes('data-group="feed"'),
+	);
+
+	const feedGroup = await postForm('/admin/rebuild/full?group=feed&offset=0&limit=50', {}, sessionCookie);
+	const feedGroupReport = (await feedGroup.json()) as { total?: number; written?: number; nextOffset?: unknown };
+	check(
+		'分组渲染 feed 只写 1 个对象',
+		feedGroup.status === 200 && feedGroupReport.total === 1 && feedGroupReport.written === 1 && feedGroupReport.nextOffset === null,
+		JSON.stringify(feedGroupReport),
+	);
+	const badGroup = await postForm('/admin/rebuild/full?group=bogus', {}, sessionCookie);
+	check('未知分组返回 400', badGroup.status === 400);
 	check('页头有品牌首页链接、前台入口、删除确认', listHtml.includes('class="brand"') && listHtml.includes('/admin/front') && listHtml.includes('onsubmit='));
 	check('列表带筛选条（关键词/状态/分类）', listHtml.includes('name="q"') && listHtml.includes('name="status"') && listHtml.includes('name="category"'));
 	check('操作栏带「修改」入口', listHtml.includes('/admin/posts/101/edit') && listHtml.includes('/preview/101'));

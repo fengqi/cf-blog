@@ -1,41 +1,47 @@
 /**
- * For more details on how to configure Wrangler, refer to:
- * https://developers.cloudflare.com/workers/wrangler/configuration/
+ * 后台 Worker 配置 —— 对应 docs/design.md §7.1
+ *
+ * 注意：这是**唯一**的 Worker，只服务后台（admin 子域名）。
+ * 前台由 R2 自定义域名直出，不经过 Worker，所以这里**故意不配 assets 绑定**。
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "cf-blog",
+	"name": "cf-blog-admin",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-09-26",
-	"assets": {
-		"binding": "ASSETS",
-		"directory": "./public"
-	},
+	/**
+	 * 资源绑定（见 docs/design.md §7.1 / §12.1）
+	 *
+	 * 绑定名即代码里的 c.env.<名字>，统一用 UPPER_SNAKE。
+	 * 改名不影响已创建的资源 —— 真正生效的是 database_name / bucket_name / id。
+	 */
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "blog-db",
+			"database_id": "db93b235-4ad8-4391-8e4c-1e9a82473f07"
+		}
+	],
+	"r2_buckets": [
+		{
+			"bucket_name": "blog-content",
+			"binding": "BUCKET"
+		}
+	],
+	"kv_namespaces": [
+		{
+			"binding": "LOGIN_KV",
+			"id": "11b1f3eab4b24348bd94d03d9e449313"
+		}
+	],
+	/**
+	 * 自定义域名：admin-blog.fengqi.me
+	 * 这个不在配置文件里配，要去 Cloudflare 控制台的
+	 * Workers → 该 Worker → Settings → Domains & Routes 添加（见 docs/design.md §12.1）
+	 * 顺序要求：先确认 R2 自定义域名生效，再配这个。
+	 */
 	"observability": {
 		"enabled": true
 	},
 	"upload_source_maps": true
-	/**
-	 * Smart Placement
-	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
-	 */
-	// "placement": {  "mode": "smart" }
-	/**
-	 * Bindings
-	 * Bindings allow your Worker to interact with resources on the Cloudflare Developer Platform, including
-	 * databases, object storage, AI inference, real-time communication and more.
-	 * https://developers.cloudflare.com/workers/runtime-apis/bindings/
-	 */
-	/**
-	 * Environment Variables
-	 * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
-	 * Note: Use secrets to store sensitive data.
-	 * https://developers.cloudflare.com/workers/configuration/secrets/
-	 */
-	// "vars": {  "MY_VARIABLE": "production_value" }
-	/**
-	 * Service Bindings (communicate between multiple Workers)
-	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
-	 */
-	// "services": [  {   "binding": "MY_SERVICE",   "service": "my-service"  } ]
 }

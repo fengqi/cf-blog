@@ -4,6 +4,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy --minify",
+    "deploy:ci": "wrangler d1 migrations apply blog-db --remote && npm run deploy",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings"
   },
   "dependencies": {

@@ -2,8 +2,13 @@
  * 分类与标签 —— 设计文档 §4.1 / §4.2 ③ / §11
  *
  * **渲染用的 count 不读 `metas.count`**：那是给后台列表看的冗余计数，
- * 改分类时漏更新就会长期偏差（§4.3 点名的坑）。这里在一条 SQL 里用相关子查询重新数，
- * 既不引入 N+1，也不依赖冗余字段的正确性。
+ * 改分类时漏更新就会长期偏差（§4.3 点名的坑）。这里实时数，但**必须用下面的
+ * GROUP BY 聚合 + LEFT JOIN 的形状**：
+ *
+ * ⚠️ 别改回「每个术语一个相关 COUNT 子查询」—— SQLite 对那个形状选的执行计划是
+ * 「扫全部已发布文章 × 反查关联」，实测 281 个术语一次要烧 **3.2 万 rows_read**
+ * （D1 免费额度 500 万/天，快照每次加载都跑它，2026-09-30 曾把当天额度吃到 78%）。
+ * JOIN 版只把 relationships/contents 各扫一遍，~1.7K 行。
  */
 
 import type { Db } from '../lib/db';
@@ -19,13 +24,20 @@ export interface TermRow {
 	count: number;
 }
 
+/** 实时计数：一次聚合出「每个 mid 名下有几篇已发布文章」，再 JOIN 回术语表 */
+const TERM_COUNT_JOIN = `
+  LEFT JOIN (
+    SELECT r.mid, COUNT(*) AS count
+      FROM relationships r
+      JOIN contents c ON c.cid = r.cid
+     WHERE c.type = 'post' AND c.status = 'publish'
+     GROUP BY r.mid
+  ) cnt ON cnt.mid = m.mid`;
+
 const TERM_SQL = `
 SELECT m.mid, m.name, m.slug, m.type, m.description, m.sort_order,
-       (SELECT COUNT(*)
-          FROM relationships r
-          JOIN contents c ON c.cid = r.cid
-         WHERE r.mid = m.mid AND c.type = 'post' AND c.status = 'publish') AS count
-  FROM metas m
+       COALESCE(cnt.count, 0) AS count
+  FROM metas m ${TERM_COUNT_JOIN}
  WHERE m.type = ?
  ORDER BY m.sort_order, m.mid`;
 
@@ -97,11 +109,8 @@ export async function ensureTags(db: Db, names: string[]): Promise<number[]> {
 export async function listAllTerms(db: Db): Promise<TermRecord[]> {
 	const rows = await db.all<TermRow>(
 		`SELECT m.mid, m.name, m.slug, m.type, m.description, m.sort_order,
-		        (SELECT COUNT(*)
-		           FROM relationships r
-		           JOIN contents c ON c.cid = r.cid
-		          WHERE r.mid = m.mid AND c.type = 'post' AND c.status = 'publish') AS count
-		   FROM metas m
+		        COALESCE(cnt.count, 0) AS count
+		   FROM metas m ${TERM_COUNT_JOIN}
 		  ORDER BY m.type, m.sort_order, m.mid`,
 	);
 	return rows.map(toTerm);

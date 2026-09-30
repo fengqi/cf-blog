@@ -227,6 +227,10 @@ rendered TEXT  -- 渲染好的 HTML，前台直接拼进页面
 `metas.count`（该分类/标签下的文章数）、`contents.words`。  
 代价是发布/删除文章时要同步更新，收益是归档页和列表页不用 `COUNT(*)` —— 每次 `COUNT(*)` 都是一次全表扫描并计入 rows read。
 
+⚠️ 实时数术语文章数**只允许用「GROUP BY 聚合 + LEFT JOIN」的形状**（`meta.ts` 的 `TERM_COUNT_JOIN`），
+别写成每个术语一个相关 COUNT 子查询：SQLite 对那个形状选「扫全部已发布文章 × 反查关联」的计划，
+281 个术语一次烧 3.2 万 rows_read（实测，2026-09-30 曾把当天 D1 免费额度吃到 78%）；JOIN 版只要 ~2.2K。
+
 **④ `contents.synced_at` / `needs_sync`——D1 与 R2 的对账字段**
 
 静态直出方案下，D1 是内容权威源，R2 是可重建的派生层，两者之间没有事务。  

@@ -10,7 +10,7 @@
 ## 一句话现状
 
 - **前台** <https://blog.fengqi.me/> —— 已是一个完整博客：Typecho 迁移完成，**803 个渲染对象 / 227 条内容 / 67 个附件**，556 条老站 URL 对账 **零意外失败**。
-- **后台** <https://admin-blog.fengqi.me/admin> —— 可登录、写/改文章（保存即发布）、预览草稿、删除、全站重建入口。
+- **后台** <https://admin-blog.fengqi.me/admin> —— 可登录、写/改文章（保存即发布）、预览草稿、删除、站点设置页（标题/描述/关键词/域名/时区/每页篇数/Turnstile site key）、全站重建入口。
 - **主题已上线** —— 指纹化 CSS/JS 写入 R2（`immutable`）、**全站零侧栏 + 顶栏导航**、文章页服务端目录、暗色模式、轻量代码高亮。
 - **老站 `fengqi.me` 仍在服务 Typecho**，两边并行；域名切换由 ⑪ 决定。
 
@@ -27,6 +27,7 @@
 | ✅ | **主题 CSS/资源流水线** | `npm run build:assets` 取内容 sha256 前 8 位做指纹 → `theme/assets.generated.ts`；资源作为 `kind:'asset'` 目标排在 `siteTargets()` **最前**，走同一套流水线写 R2（`immutable`）；`layout.ts` 注入 `<link>` 与 `defer` 脚本；**单篇发布不重写资源**（有断言）；线上全站重渲 **800 对象 / 0 失败** |
 | ✅ | 主题排版与响应式 | 两栏骨架（内容 + 17rem 侧栏，≤62rem 收成单栏）、亮/暗双主题（`prefers-color-scheme` + 手动切换 + localStorage，首屏内联脚本防闪白，**无 JS 也能进暗色**）、侧栏五段（关于/分类/最新文章/归档/标签云，空段不渲染，**顺序与限高是按真实数据量出来的**：198 个标签、58 个月份全铺开会把侧栏撑到 2163px，现在 1130px）、正文排版（17px / 1.85 行高 / 标题 / 列表 / 引用 / 表格 / 图片）、代码块与 `tok-*` 语法高亮、分页器 |
 | ✅ | **导航/版式改版 + 删除路径修复** | 侧栏整站移除，导航收进顶栏（首页/分类/标签/归档/关于，不展开）；新增 `/categories/`、`/tags/`、`/archives/` 三个索引页（纯新增 URL，进 sitemap）；索引页排版：分类保持一行一条带描述，标签一行多个流式胶囊，归档按年份分组 + 月份流式；都不输出「共 N 个…」说明行。文章页服务端抽 h2/h3 生成锚点 + 目录（宽屏溢出到容器右侧留白里 `sticky` / 窄屏原生 `<details>`，零 JS，带滚动高亮）；容器宽度**全站一档**（唯一开关 `--container-size` = 50rem，目录不占正文宽度）；`deletePost` 从「全站重写 800 个对象」改为按影响面 **~35 个**。本地 e2e **145 项全过**；Chrome 实测（1280 / 1400 / 390 / 亮暗）版式与目录行为符合预期 |
+| ✅ | **后台设置页** | `/admin/settings`（顶栏新增「设置」入口）：站点标题/描述/关键词/域名/时区/每页篇数/`turnstile_site_key` 一次 batch 写库（`saveSiteSettings`）。校验：域名必须完整 http(s) 且剥末尾斜杠、每页篇数 1~100、时区 -12~14 整数小时；**前台可见配置变动时自动把全站标脏**（走 Cron 逐批重建，消息里带篇数），只改 Turnstile key 不标脏。e2e **150 项全过**（+5） |
 | ✅ | 保真与语义验证 | 逐句比对老站页面（手写 HTML 老文章 / markdown 近期文章 / hidden 文章 / 独立页面）全部命中；`<font color>` 保留 9 处；hidden 页面 200 且不进首页/Feed/sitemap；老站上 500 的 `/memos.html`、`/pocket.html` 现在正常；`/sitemap.xml` 从无到有 |
 
 ---
@@ -35,7 +36,6 @@
 
 | # | 事项 | 为什么 / 备注 | 状态 |
 |---|---|---|---|
-| ③ | 后台设置页 | 站点标题/描述/关键词/域名/timezone/每页篇数/`turnstile_site_key` —— 目前改这些只能进 SQL | ⏳ |
 | ④ | 后台媒体库 | 附件上传到 R2（`/usr/uploads/<年>/<月>/`，路径规则见 design §9）+ 列表 + 复制链接 | ⏳ |
 | ⑤ | 后台改口令页 | PBKDF2 生成 + `token_version += 1`（改完自动登出全部设备） | ⏳ |
 | ⑥ | 「全站重渲」按钮改分批循环 | 现在按钮只标脏，靠 Cron 每小时 20 篇慢磨；改成循环调 `/admin/rebuild/full` 立刻刷完 | ⏳ |
@@ -83,7 +83,7 @@
 # 主题资源打指纹（改了 theme/assets/ 之后必跑）
 npm run build:assets
 
-# 本地端到端断言（真实 workerd + 本地 D1/R2/KV，142 项）
+# 本地端到端断言（真实 workerd + 本地 D1/R2/KV，150 项）
 npx wrangler d1 migrations apply blog-db --local
 npx wrangler dev -c wrangler.e2e.jsonc --port 8788
 curl -s http://127.0.0.1:8788/ | tail -3          # 看到「全部通过」

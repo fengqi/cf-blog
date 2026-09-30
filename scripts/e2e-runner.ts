@@ -589,6 +589,54 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	const listHtml = await listPage.text();
 	check('登录后能进文章列表', listPage.status === 200 && listHtml.includes('第 2 篇'));
 
+	// 后台设置页：SSR 表单保存 options（§6.1 / §7.3）
+	lines.push('=== 后台设置页 ===');
+	const settingsPage = await call('/admin/settings', { headers: { cookie: sessionCookie } });
+	const settingsHtml = await settingsPage.text();
+	check(
+		'设置页能打开且字段齐全',
+		settingsPage.status === 200 &&
+			['site_title', 'site_description', 'site_keywords', 'site_url', 'posts_per_page', 'timezone', 'turnstile_site_key'].every(
+				(name) => settingsHtml.includes(`name="${name}"`),
+			),
+		String(settingsPage.status),
+	);
+
+	const saveSettings = await postForm(
+		'/admin/settings',
+		{
+			site_title: '风息的测试站',
+			site_description: 'e2e 描述',
+			site_keywords: 'e2e',
+			site_url: 'https://blog.fengqi.me/', // 末尾斜杠应被剥掉，归一化后与夹具一致
+			posts_per_page: '5',
+			timezone: '8',
+			turnstile_site_key: '1x00000000000000000000AA',
+		},
+		sessionCookie,
+	);
+	const settingsLocation = decodeURIComponent(saveSettings.headers.get('location') ?? '');
+	check('保存设置返回 303 且前台配置变动时排入重建', saveSettings.status === 303 && settingsLocation.includes('排入重建'), settingsLocation);
+	const perPageRow = await all<{ value: string }>("SELECT value FROM options WHERE name = 'posts_per_page' AND user = 0");
+	check('设置已写入 options 表', perPageRow[0]?.value === '5', perPageRow[0]?.value);
+	const siteUrlRow = await all<{ value: string }>("SELECT value FROM options WHERE name = 'site_url' AND user = 0");
+	check('site_url 已归一化（无末尾斜杠）', siteUrlRow[0]?.value === 'https://blog.fengqi.me', siteUrlRow[0]?.value);
+
+	const badSettings = await postForm(
+		'/admin/settings',
+		{
+			site_title: 'x',
+			site_description: '',
+			site_keywords: '',
+			site_url: 'blog.fengqi.me', // 缺协议，必须被拒
+			posts_per_page: '10',
+			timezone: '8',
+			turnstile_site_key: '',
+		},
+		sessionCookie,
+	);
+	check('缺协议的域名被拒', badSettings.status === 303 && decodeURIComponent(badSettings.headers.get('location') ?? '').includes('error='), badSettings.headers.get('location') ?? '');
+
 	// 走表单改缩略名 —— 顺便验证 §5.1 方案 A（旧 URL 保留 canonical）
 	const editView = await call('/admin/posts/101/edit', { headers: { cookie: sessionCookie } });
 	check('编辑器能打开', editView.status === 200 && (await editView.text()).includes('name="body"'));

@@ -22,12 +22,13 @@ import {
 	updateContentFields,
 } from '../models/content';
 import { ensureTags, listTerms } from '../models/meta';
-import { getSiteOptions } from '../models/option';
+import { getOptionValue, getSiteOptions, saveSiteSettings } from '../models/option';
 import { deletePost, publishPost, rebuildTargetsSlice } from '../publish/pipeline';
 import { reconcileNeedsSync } from '../publish/sync';
 import { hasUrl, postKeyOf } from '../publish/targets';
 import { PostEditorPage } from '../views/post-editor';
 import { PostListPage } from '../views/post-list';
+import { SettingsPage } from '../views/settings';
 import type { AdminVariables } from '../middleware/auth';
 import type { AdminEnv } from '../types';
 
@@ -102,6 +103,91 @@ adminRoutes.get('/admin', async (c) => {
 			error={c.req.query('error')}
 		/>,
 	);
+});
+
+adminRoutes.get('/admin/settings', async (c) => {
+	const db = createDb(c.env.DB, 'admin');
+	// turnstile_site_key 不在 SiteOptions 里（那是主题要的东西），单独读
+	const [options, turnstileSiteKey] = await Promise.all([
+		getSiteOptions(c.env),
+		getOptionValue(db, 'turnstile_site_key'),
+	]);
+
+	return c.html(
+		<SettingsPage
+			user={c.var.user}
+			values={{
+				title: options.title,
+				description: options.description,
+				keywords: options.keywords,
+				siteUrl: options.siteUrl,
+				postsPerPage: options.postsPerPage,
+				timezoneOffset: options.timezoneOffset,
+				turnstileSiteKey: turnstileSiteKey ?? '',
+			}}
+			message={c.req.query('message')}
+			error={c.req.query('error')}
+		/>,
+	);
+});
+
+adminRoutes.post('/admin/settings', async (c) => {
+	const db = createDb(c.env.DB, 'admin');
+	const form = await c.req.formData();
+	const text = (name: string) => String(form.get(name) ?? '').trim();
+
+	// site_url：剥掉末尾斜杠后必须是合法 http(s) 地址 —— 它错了整站 canonical/feed/sitemap 全错，
+	// 所以这里从严校验，而不是靠 getSiteOptions 读取时的报错兜底
+	const siteUrl = text('site_url').replace(/\/+$/, '');
+	try {
+		const parsed = new URL(siteUrl);
+		if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error('协议必须是 http(s)');
+	} catch {
+		return c.redirect(
+			'/admin/settings?error=' + encodeURIComponent('域名必须是完整的 http(s) 地址，如 https://blog.fengqi.me'),
+			303,
+		);
+	}
+
+	const postsPerPage = Number.parseInt(text('posts_per_page'), 10);
+	if (!(postsPerPage >= 1 && postsPerPage <= 100)) {
+		return c.redirect('/admin/settings?error=' + encodeURIComponent('每页篇数必须是 1~100 的整数'), 303);
+	}
+
+	const timezone = Number.parseInt(text('timezone'), 10);
+	if (!(timezone >= -12 && timezone <= 14)) {
+		return c.redirect('/admin/settings?error=' + encodeURIComponent('时区必须是 -12~14 的整数小时'), 303);
+	}
+
+	// 保存前的快照：用来判断「前台可见的配置」变没变（变了就要全站重渲）
+	const before = await getSiteOptions(c.env);
+	await saveSiteSettings(db, {
+		site_title: text('site_title'),
+		site_description: text('site_description'),
+		site_keywords: text('site_keywords'),
+		site_url: siteUrl,
+		posts_per_page: String(postsPerPage),
+		timezone: String(timezone),
+		turnstile_site_key: text('turnstile_site_key'),
+	});
+	const after = await getSiteOptions(c.env);
+
+	const frontChanged =
+		before.title !== after.title ||
+		before.description !== after.description ||
+		before.keywords !== after.keywords ||
+		before.siteUrl !== after.siteUrl ||
+		before.postsPerPage !== after.postsPerPage ||
+		before.timezoneOffset !== after.timezoneOffset;
+
+	let message = '设置已保存';
+	if (frontChanged) {
+		// 与「全站重新渲染」按钮同一机制：标脏交给 Cron 逐批重建（§6.5）；
+		// 想立刻刷完用分批重建循环（POST /admin/rebuild/full）
+		const marked = await markAllDirty(db);
+		message = `设置已保存；前台配置有变动，已把 ${marked} 篇内容排入重建（Cron 每小时 20 篇，或用分批重建立即刷完）`;
+	}
+	return c.redirect('/admin/settings?message=' + encodeURIComponent(message), 303);
 });
 
 adminRoutes.get('/admin/posts/new', async (c) => {

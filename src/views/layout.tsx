@@ -59,6 +59,7 @@ export function AdminLayout(props: AdminLayoutProps) {
 						<strong>博客后台</strong>
 						<a href="/admin">文章</a>
 						<a href="/admin/posts/new">写文章</a>
+						<a href="/admin/settings">设置</a>
 						<span class="spacer" />
 						<span class="hint">{props.user.screen_name || props.user.username}</span>
 						<form method="post" action="/admin/logout">

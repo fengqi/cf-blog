@@ -153,3 +153,31 @@ export async function setOptionValue(db: Db, name: string, value: string): Promi
 	// 配置改了要让内存缓存失效（§7.3）
 	clearSiteOptionsCache();
 }
+
+/** 设置页可写的全部配置项（表单字段名与 options.name 一一对应） */
+export const SITE_SETTING_KEYS = [
+	'site_title',
+	'site_description',
+	'site_keywords',
+	'site_url',
+	'posts_per_page',
+	'timezone',
+	'turnstile_site_key',
+] as const;
+
+/**
+ * 批量保存设置页的配置项（后台设置页专用）。
+ * 一次 batch 一次往返；`turnstile_site_key` 与前台渲染无关，其余字段变了要全站重渲
+ * —— 那个判断在 routes/admin.tsx 里做，这里只管写库和清缓存。
+ */
+export async function saveSiteSettings(db: Db, values: Record<string, string>): Promise<void> {
+	const statements = SITE_SETTING_KEYS.filter((name) => name in values).map((name) =>
+		db.prepare(
+			`INSERT INTO options (name, user, value) VALUES (?, 0, ?)
+			 ON CONFLICT(name, user) DO UPDATE SET value = excluded.value`,
+			[name, values[name]],
+		),
+	);
+	if (statements.length > 0) await db.batch(statements);
+	clearSiteOptionsCache();
+}

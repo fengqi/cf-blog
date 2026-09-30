@@ -164,6 +164,19 @@ wrangler secret put TURNSTILE_SECRET
 
 之后 push 到 `master` 自动构建 + 部署，构建日志在 **Worker → Deployments** 里看。
 
+**⚠️ `deploy:ci` 不重渲 R2。** 它只上传代码 + 应用迁移；桶里 800 个静态对象一个不动。
+这次改动**会不会出现在前台 HTML 的字节里**，决定要不要在部署后补一步：
+
+- 改了 `theme/assets/`（CSS/JS）、`theme/` 模板、`src/publish` 渲染逻辑 → **要**：
+  本地跑 `npm run publish:prod`（自动：起 `--remote` 发布会话 → `/full` 从 0 循环到
+  `nextOffset=null` → 自查主题指纹对象都在桶里，缺了就报错退出）。跳过这步或中途
+  只跑一半，就会出现「页面引用的指纹在桶里不存在 → CSS/JS 404」的事故。
+- 只改后台（`src/routes`、`src/views`、`src/models` 等不影响前台输出的）→ 不要，部署即生效。
+- 内容增删改走后台，发布流水线自动增量处理，与 CI 无关。
+
+`publish:prod` 用的是 `wrangler dev --remote`：跑的是**本地工作区这份代码**，所以跑之前
+确保工作区就是刚部署上去的内容（干净、最新）。幂等，失败直接重跑。
+
 **两个必须知道的点：**
 
 1. **Builds token 需要有 D1 编辑权限。** 部署命令里要跑迁移，而 Cloudflare 自动创建的那个 Builds token 可能**没有** D1: Edit 权限 —— 缺了迁移会失败。首次构建后看一眼日志，失败就自己建一个带该权限的 token 换上去。

@@ -98,10 +98,8 @@ npm run preview:r2
 npm run rebuild:local                                            # 循环 /__publish 重渲本地 R2（自动到 nextOffset=null）
 curl "http://127.0.0.1:8790/__keys"                              # 列对象对账
 
-# 生产全量重建（写了模板/样式之后）
-npx wrangler dev -c wrangler.publish.jsonc --remote --port 8788
-curl "http://127.0.0.1:8788/full?offset=0&limit=50"   # 循环到 nextOffset 为 null
-curl "http://127.0.0.1:8788/keys"                     # 列举线上对象，用于对账
+# 生产全量重建（部署后：这次改动出现在前台 HTML 字节里 → 必跑）
+npm run publish:prod   # 起 --remote 发布会话 → /full 从 0 循环到 null → 指纹自查
 
 # 附件迁移（按原路径写 R2）
 npx tsx scripts/upload-attachments.ts --root .import --dry-run

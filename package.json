@@ -2,16 +2,17 @@
   "name": "cf-blog-admin",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "preview:r2": "wrangler dev -c wrangler.preview.jsonc --port 8790",
+    "dev": "npx wrangler dev",
+    "preview:r2": "npx wrangler dev -c wrangler.preview.jsonc --port 8790",
     "rebuild:local": "tsx scripts/rebuild-local.ts",
     "typecheck": "tsc --noEmit",
     "build:assets": "tsx scripts/build-assets.ts",
     "bench:render": "tsx scripts/bench-render.ts",
     "hash-password": "tsx scripts/hash-password.ts",
-    "deploy": "wrangler deploy --minify",
-    "deploy:ci": "npm run build:assets && wrangler d1 migrations apply blog-db --remote && npm run deploy",
-    "cf-typegen": "wrangler types --env-interface CloudflareBindings"
+    "deploy": "npx wrangler deploy --minify",
+    "publish:prod": "tsx scripts/publish-full.ts",
+    "deploy:ci": "npm run build:assets && npx wrangler d1 migrations apply blog-db --remote && npm run deploy",
+    "cf-typegen": "npx wrangler types --env-interface CloudflareBindings"
   },
   "dependencies": {
     "hono": "^4.13.11",

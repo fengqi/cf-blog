@@ -1,9 +1,8 @@
 /**
  * 文章列表 —— 设计文档 §6.2 第 5 条 / §6.5
  *
- * 两个必须出现在这里的东西：
- *   - **「待同步」数量**：让作者看见 R2 写失败，而不是靠运气发现
- *   - **「全站重新渲染」按钮**：改了模板/样式之后刷历史文章的唯一入口
+ * 「待同步」计数挂在这里提醒作者 R2 有积压；两个渲染操作（全站/增量）
+ * 在独立的 /admin/render 维护页里，列表只留入口。
  */
 
 import type { AdminPostRow } from '../models/content';
@@ -41,11 +40,15 @@ export function PostListPage(props: PostListPageProps) {
 				<a class="button" href="/admin/posts/new">
 					写文章
 				</a>
-				<form method="post" action="/admin/rebuild" id="rebuild-form">
-					<button type="submit">全站重新渲染</button>
-				</form>
-				<span id="rebuild-progress" class="hint" role="status">
-					{props.needsSync > 0 ? <span class="badge dirty">待同步 {props.needsSync}</span> : null}
+				<a class="button" href="/admin/render">
+					渲染维护
+				</a>
+				<span class="hint">
+					{props.needsSync > 0 ? (
+						<a class="badge dirty" href="/admin/render">
+							待同步 {props.needsSync}
+						</a>
+					) : null}
 				</span>
 				<span class="hint">
 					{hasFilter ? `筛出 ${props.posts.length} 条` : `共 ${props.posts.length} 条`}
@@ -127,61 +130,6 @@ export function PostListPage(props: PostListPageProps) {
 				</tbody>
 			</table>
 			{props.posts.length === 0 ? <p class="hint">还没有内容。</p> : null}
-
-			<script>{`
-document.addEventListener('DOMContentLoaded', function () {
-  var form = document.getElementById('rebuild-form');
-  if (!form) return;
-  form.addEventListener('submit', function (event) {
-    event.preventDefault();
-    var button = form.querySelector('button');
-    var progress = document.getElementById('rebuild-progress');
-    button.disabled = true;
-    var offset = 0;
-    var written = 0;
-    var failed = [];
-    function post(path, params) {
-      return fetch(path, {
-        method: 'POST',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams(params),
-        credentials: 'same-origin',
-      }).then(function (response) { return response.json(); });
-    }
-    // 阶段一：分批重写全站对象（模板/导航/配置变更用）
-    function rebuildFull() {
-      return post('/admin/rebuild/full', { offset: String(offset), limit: '50' }).then(function (report) {
-        written += report.written;
-        failed = failed.concat(report.failed || []);
-        progress.textContent = '重建中… ' + (report.offset + report.written) + ' / ' + report.total;
-        if (report.nextOffset === null) return;
-        offset = report.nextOffset;
-        return rebuildFull();
-      });
-    }
-    // 阶段二：补发「待同步」的内容（地址变更/写失败的对账），直到清零
-    function drainDirty() {
-      return post('/admin/rebuild/batch', { limit: '20' }).then(function (report) {
-        written += report.objects;
-        failed = failed.concat(report.failed || []);
-        progress.textContent = '补发中… 剩余 ' + report.needsSync + ' 篇';
-        if (report.needsSync > 0) return drainDirty();
-      });
-    }
-    rebuildFull()
-      .then(drainDirty)
-      .then(function () {
-        progress.textContent = '完成：' + written + ' 个对象' +
-          (failed.length > 0 ? '，失败 ' + failed.length + ' 个（可重试）' : '');
-        button.disabled = false;
-      })
-      .catch(function (error) {
-        progress.textContent = '失败：' + error + '（可重试）';
-        button.disabled = false;
-      });
-  });
-});
-`}</script>
 		</AdminLayout>
 	);
 }

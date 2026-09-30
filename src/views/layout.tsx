@@ -241,6 +241,18 @@ form.stack .actions button[type=submit]:hover {
 .filter-bar select { flex: 0 1 auto; width: auto; }
 .filter-bar button, .filter-bar a.button { padding: 0.35rem 0.8rem; font-weight: 400; }
 
+/* 渲染维护页：两块独立操作 */
+.render-block {
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: 1.1rem 1.25rem;
+	margin-bottom: 1.25rem;
+	max-width: 46rem;
+}
+.render-block h2 { margin-top: 0; }
+.render-block .actions { margin-top: 0.75rem; }
+.badge.dirty:hover { text-decoration: none; filter: brightness(1.1); }
+
 /* --- 登录页 --- */
 
 .login {
@@ -286,6 +298,7 @@ export function AdminLayout(props: AdminLayoutProps) {
 							<a href="/admin/media">媒体</a>
 							<a href="/admin/settings">设置</a>
 							<a href="/admin/password">口令</a>
+							<a href="/admin/render">渲染</a>
 							<span class="spacer" />
 							<a href="/admin/front" target="_blank">前台 ↗</a>
 							<form method="post" action="/admin/logout">

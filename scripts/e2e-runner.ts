@@ -588,7 +588,18 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	const listPage = await call('/admin', { headers: { cookie: sessionCookie } });
 	const listHtml = await listPage.text();
 	check('登录后能进文章列表', listPage.status === 200 && listHtml.includes('第 2 篇'));
-	check('重渲按钮带分批循环脚本（待办 ⑥）', listHtml.includes('id="rebuild-form"') && listHtml.includes('/admin/rebuild/full'));
+	check('列表有渲染维护入口、待同步徽标链到渲染页', listHtml.includes('/admin/render') && !listHtml.includes('id="rebuild-form"'));
+
+	const renderPage = await call('/admin/render', { headers: { cookie: sessionCookie } });
+	const renderHtml = await renderPage.text();
+	check(
+		'渲染维护页拆出两个独立操作（全站/增量）',
+		renderPage.status === 200 &&
+			renderHtml.includes('id="full-start"') &&
+			renderHtml.includes('id="drain-start"') &&
+			renderHtml.includes('/admin/rebuild/full') &&
+			renderHtml.includes('/admin/rebuild/batch'),
+	);
 	check('页头有品牌首页链接、前台入口、删除确认', listHtml.includes('class="brand"') && listHtml.includes('/admin/front') && listHtml.includes('onsubmit='));
 	check('列表带筛选条（关键词/状态/分类）', listHtml.includes('name="q"') && listHtml.includes('name="status"') && listHtml.includes('name="category"'));
 	check('操作栏带「修改」入口', listHtml.includes('/admin/posts/101/edit') && listHtml.includes('/preview/101'));

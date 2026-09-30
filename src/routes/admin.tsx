@@ -53,6 +53,7 @@ import { ChangePasswordPage } from '../views/password';
 import { MediaLibraryPage } from '../views/media';
 import { PostEditorPage } from '../views/post-editor';
 import { PostListPage } from '../views/post-list';
+import { RenderPage } from '../views/render';
 import { SettingsPage } from '../views/settings';
 import type { AdminVariables } from '../middleware/auth';
 import type { AdminEnv } from '../types';
@@ -150,6 +151,15 @@ adminRoutes.get('/admin', async (c) => {
 adminRoutes.get('/admin/front', async (c) => {
 	const options = await getSiteOptions(c.env);
 	return c.redirect(options.siteUrl || '/admin', 302);
+});
+
+/** 渲染维护页：全站渲染（阶段一）与增量渲染（阶段二）两个独立操作 */
+adminRoutes.get('/admin/render', async (c) => {
+	const db = createDb(c.env.DB, 'admin');
+	const needsSync = await countNeedsSync(db);
+	return c.html(
+		<RenderPage needsSync={needsSync} user={c.var.user} message={c.req.query('message')} error={c.req.query('error')} />,
+	);
 });
 
 adminRoutes.get('/admin/settings', async (c) => {

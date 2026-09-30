@@ -3,7 +3,8 @@
  *
  *   npm run build:assets
  *
- * 读 `theme/assets/` 下的每个文件，算内容 sha256 的前 8 位做指纹，产出
+ * 读 `theme/assets/` 下的每个文件，CSS/JS 用 esbuild 压缩（单文件 transform，
+ * 不 bundle），对**压缩后的内容**算 sha256 前 8 位做指纹，产出
  * `theme/assets.generated.ts`（一个普通的 TS 模块，内容是转义好的字面量）。
  *
  * **为什么是「生成 .ts 模块」而不是在代码里 `import './style.css'`**：
@@ -20,6 +21,7 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { transform } from 'esbuild';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCE_DIR = join(ROOT, 'theme', 'assets');
@@ -63,6 +65,27 @@ function literal(value: string): string {
 	return JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 }
 
+/**
+ * 压缩 CSS / JS。**指纹算在压缩后的内容上**（R2 里存什么就指纹什么）；
+ * 源文件（`theme/assets/`）保持带注释带换行的可读形态。
+ * 只 transform 不 bundle：单文件压缩，依赖关系、加载顺序都不动。
+ */
+const MINIFY_LOADERS: Record<string, 'css' | 'js'> = {
+	'.css': 'css',
+	'.js': 'js',
+	'.mjs': 'js',
+};
+
+async function buildContent(name: string, raw: string): Promise<string> {
+	const loader = MINIFY_LOADERS[extname(name)];
+	if (!loader) return raw;
+	const result = await transform(raw, { loader, minify: true });
+	if (result.warnings.length > 0) {
+		for (const warning of result.warnings) console.warn(`[assets] ${name}: ${warning.text}`);
+	}
+	return result.code;
+}
+
 async function main(): Promise<void> {
 	const entries = (await readdir(SOURCE_DIR, { withFileTypes: true }))
 		.filter((entry) => entry.isFile() && !entry.name.startsWith('.'))
@@ -79,7 +102,8 @@ async function main(): Promise<void> {
 			continue;
 		}
 
-		const content = await readFile(join(SOURCE_DIR, name), 'utf8');
+		const raw = await readFile(join(SOURCE_DIR, name), 'utf8');
+		const content = await buildContent(name, raw);
 		const hash = createHash('sha256').update(content, 'utf8').digest('hex').slice(0, HASH_LENGTH);
 		assets.push({
 			name,

@@ -1,5 +1,5 @@
 {
-  "name": "cf-blog",
+  "name": "cf-blog-admin",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",

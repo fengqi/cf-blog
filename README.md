@@ -48,6 +48,19 @@ npm run deploy       # 手动部署（不碰数据库）
 npm run deploy:ci    # 应用 D1 迁移 + 部署（Workers Builds 用的就是这个）
 ```
 
+### 本地端到端验证
+
+跑的是**真实 workerd + 本地 D1/R2**，覆盖发布流水线、`needs_sync` 状态机、XSS 清洗、定时发布、删除：
+
+```bash
+npx wrangler d1 migrations apply blog-db --local      # 首次或改了迁移之后
+npx wrangler dev -c wrangler.e2e.jsonc --port 8788    # 另开一个终端
+curl -s http://127.0.0.1:8788/ | tail -3              # 看到「全部通过」即 OK
+```
+
+断言集在 `scripts/e2e-runner.ts`（68 项）。`wrangler.e2e.jsonc` 只给本地用，**不要拿它部署**。
+（`wrangler dev` 需要写 `~/.wrangler/registry`，在受限沙箱里跑不起来。）
+
 ## 资源与绑定
 
 `wrangler.jsonc` 里已配好，绑定名统一 UPPER_SNAKE：

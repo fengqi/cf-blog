@@ -82,7 +82,17 @@ function monthTargets(snapshot: SiteSnapshot): Target[] {
 }
 
 /**
+ * 内容有没有 URL。独立页面永远有（单段 key）；文章**必须有分类** ——
+ * permalink 形状是 `/<category>/<slug>.html`，没分类就拼不出地址。
+ */
+export function hasUrl(record: PostRecord): boolean {
+	return record.type === 'page' || record.categories.length > 0;
+}
+
+/**
  * **全站对象清单** —— 首次发布（§12.2）与「全站重新渲染」（§6.5）用它。
+ *
+ * 前置条件：快照里的文章**都已经有分类**（`loadSnapshot` 会把没分类的过滤掉）。
  */
 export function siteTargets(snapshot: SiteSnapshot): Target[] {
 	const perPage = snapshot.postsPerPage;
@@ -119,6 +129,9 @@ export function siteTargets(snapshot: SiteSnapshot): Target[] {
  * 同步部分只有文章页本身，其余交给 `ctx.waitUntil()`。
  * 注意偏移分页会让**首页与全部分页整体顺移**，所以它们全在清单里 —— 这也是 §5.3 的结论：
  * 一次发布约 30~40 个对象，量级上完全不需要优化。
+ *
+ * ⚠️ `post` 参数**必须带上它的 tags**（否则标签归档不会进清单）——
+ * 所以传的是 `getContentByCid` 拿到的完整记录，不是列表查询的瘦身版。
  */
 export function postPublishTargets(snapshot: SiteSnapshot, post: PostRecord): Target[] {
 	const perPage = snapshot.postsPerPage;
@@ -138,9 +151,27 @@ export function postPublishTargets(snapshot: SiteSnapshot, post: PostRecord): Ta
 	return siteTargets(snapshot).filter((target) => wanted.has(target.key));
 }
 
-/** 文章被删除时要清掉的对象（其余归档靠重建覆盖） */
-export function postDeleteKeys(post: PostRecord): string[] {
-	return [postKeyOf(post)];
+/**
+ * 独立页面变更后要重建的子集。
+ *
+ * 页面**不出现在**首页列表、归档、Feed 里，所以只有它自己和 sitemap 需要重建
+ * （sitemap 里列了页面）。这一点和文章不同，别照抄 `postPublishTargets`。
+ */
+export function pagePublishTargets(snapshot: SiteSnapshot, page: PostRecord): Target[] {
+	const wanted = new Set<string>([standaloneKeyOf(page), SITEMAP_KEY]);
+	return siteTargets(snapshot).filter((target) => wanted.has(target.key));
+}
+
+/** 按内容类型分发 —— 调用方不该自己去判断这是文章还是独立页面 */
+export function contentPublishTargets(snapshot: SiteSnapshot, record: PostRecord): Target[] {
+	return record.type === 'page'
+		? pagePublishTargets(snapshot, record)
+		: postPublishTargets(snapshot, record);
+}
+
+/** 内容被删除时要清掉的对象（其余归档靠重建覆盖）——同样按类型分发 */
+export function contentDeleteKeys(record: PostRecord): string[] {
+	return record.type === 'page' ? [standaloneKeyOf(record)] : [postKeyOf(record)];
 }
 
 /** 同一 key 出现两次是数据问题的信号，这里静默去重并保留第一个 */

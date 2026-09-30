@@ -21,6 +21,8 @@ export interface TermRecord {
 /** 一篇内容（文章或独立页面） */
 export interface PostRecord {
 	cid: number;
+	/** post = 文章（URL 两段），page = 独立页面（URL 单段） */
+	type: 'post' | 'page';
 	title: string;
 	/** URL 片段，可能含中文 */
 	slug: string;

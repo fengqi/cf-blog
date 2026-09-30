@@ -88,6 +88,7 @@ function buildSnapshot(): SiteSnapshot {
 
 		posts.push({
 			cid: 1000 - index,
+			type: 'post',
 			title: `第 ${index + 1} 篇压测文章：${category.name} 相关`,
 			slug: `bench-${1000 - index}`,
 			created,
@@ -120,6 +121,7 @@ function buildSnapshot(): SiteSnapshot {
 	const pages: PostRecord[] = [
 		{
 			cid: 1,
+			type: 'page',
 			title: 'About',
 			slug: 'about',
 			created: start,
@@ -131,6 +133,7 @@ function buildSnapshot(): SiteSnapshot {
 		},
 		{
 			cid: 2,
+			type: 'page',
 			title: 'Guest',
 			slug: 'guest',
 			created: start,

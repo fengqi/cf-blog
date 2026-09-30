@@ -406,6 +406,14 @@ await env.BUCKET.put('feed/', feedXml, {
 
 目标：**避免 N+1，查询次数保持可控**。后台请求量极小（每天几十次），这条主要是代码纪律，不是性能压力。
 
+> **已实现并断言（2026-09）**：装配一份完整的站点快照（`src/publish/snapshot.ts`）**固定 6 次查询**，
+> 与文章数、标签数无关；本地 e2e 里有一条断言盯着这个数字（`scripts/e2e-runner.ts`）。
+> 6 次分别是：options、contents（文章+分类标签聚合）、contents（独立页面）、
+> metas（分类标签+实时计数）、contents（年月分组）、permalink_history。
+>
+> 实现时踩过的反例：为了「列表别拉正文」把 `rendered` 从列表查询里去掉，
+> 结果快照拿不到正文，文章页只剩骨架 —— **快照必须是「渲染完备」的**，详见 §13.4。
+
 **渲染一篇文章（发布时，2 次）**
 
 ```sql
@@ -528,6 +536,11 @@ markdown-it 处理 1 万字约 3–8ms，再叠加模板套用和 XSS 清洗，�
 1. 保存拆两步：先落库 body，再用 `ctx.waitUntil()` 异步渲染回填 `rendered`
 2. Cron 兜底：定期扫 `rendered = ''` 的文章补渲染
 
+> **两条都已实现（2026-09）**：`publishPost` 的渲染与页面生成可以分开，
+> Cron 对账里的 `ensureRendered()` 会在写 R2 之前把 `rendered` 为空的内容补渲染。
+> 这不只是为了大文章 —— **定时文章（`waiting` → `publish`）从没走过「保存并发布」，
+> 它的 body 一定没渲染过**，少了这一步就会写出一堆空壳页面（§13.4 第 3 条）。
+
 注意：**渲染完整页面比渲染片段更吃 CPU**（要套骨架、算分页、串相关文章），
 所以 §13.1 第 4 项（发布流水线的实际 CPU 与墙钟耗时）的验收阈值，必须按**完整页面**来测，不能只测渲染片段。
 
@@ -565,7 +578,9 @@ markdown-it 的版本升级可能改变输出，所有文章共用一套渲染�
   ],
   "kv_namespaces": [
     { "binding": "LOGIN_KV", "id": "<id>" }
-  ]
+  ],
+  // §12.3：每小时一次，做「定时发布 + needs_sync 对账」
+  "triggers": { "crons": ["0 * * * *"] }
 }
 ```
 
@@ -702,6 +717,17 @@ wrangler d1 execute blog-db --remote --command \
 
 - 文章 HTML：`rendered` 写入前用白名单清洗（`script`/`iframe`/`on*` 属性全部剔除，`a[href]` 校验协议）
 - 后台表单：所有输出走统一的 `escapeHtml()` 工具
+
+> **实现记录（2026-09）**：清洗用 **js-xss**（白名单模型、零运行时依赖、纯 JS，Worker 里直接跑），
+> 配置在 `src/lib/sanitize.ts`；Markdown 用 markdown-it，`html: true`。
+>
+> **为什么不干脆关掉 markdown 的 HTML 透传（`html: false`）**：那样确实最省事，但存量 Typecho
+> 文章里有原生 HTML（`<img>`、`<div>`），关掉会把它们全部转义成文本，历史文章直接烂掉。
+> 所以选择「放行 + 白名单清洗」，代价是要维护那份白名单。
+>
+> 实测覆盖的向量（见 `scripts/e2e-runner.ts`）：`<script>`、`<img onerror>`、
+> 原生 `<a href="javascript:">`（href 被剥掉）、markdown 的 `[x](javascript:)`
+> （markdown-it 自己就拒绝，输出为字面文本）。
 
 去掉评论后，全站唯一的用户输入入口就是后台，XSS 面收缩到"作者自己写的文章内容"。
 但**清洗仍不能省**：Markdown 里嵌入的原生 HTML 会原样进 `rendered`，不洗就是给自己留后门。
@@ -840,7 +866,6 @@ cf-blog/
 │       └── app.js
 ├── src/
 │   ├── index.ts                   # Worker 入口（后台）
-│   ├── types.ts                   # Env 绑定类型、模型类型
 │   ├── views/                     # ★ 后台页面组件（Hono JSX，.tsx）
 │   │   ├── layout.tsx             # 后台骨架
 │   │   ├── login.tsx
@@ -853,19 +878,20 @@ cf-blog/
 │   │   └── preview.ts             # 草稿预览（R2 里还不存在的对象）
 │   ├── publish/                   # ★ 发布流水线，本方案的核心
 │   │   ├── pipeline.ts            # 编排：渲染 → 写 D1 → 写 R2 → 异步重建
+│   │   ├── snapshot.ts            # 从 D1 装配快照（6 次查询，与文章数无关）
 │   │   ├── targets.ts             # 一次发布要重建哪些对象，见 §5.3
-│   │   ├── render.ts              # 完整页面渲染（套模板骨架）
-│   │   └── sync.ts                # needs_sync 对账与重试，见 §6.2
-│   ├── models/
-│   │   ├── content.ts             # 含聚合查询，禁止在别处裸写 SQL
-│   │   ├── meta.ts
-│   │   ├── user.ts
-│   │   └── option.ts
+│   │   ├── render.ts              # 完整页面渲染（套模板骨架 + feed/sitemap）
+│   │   ├── types.ts               # 数据契约：无 SQL、无 HTML，便于单测
+│   │   └── sync.ts                # needs_sync 对账与定时发布，见 §6.2 / §12.3
+│   ├── models/                    # ★ SQL 只允许写在这里（和 lib/db.ts）
+│   │   ├── content.ts             # contents 读写 + 聚合查询
+│   │   ├── meta.ts                # 分类 / 标签 + 实时计数
+│   │   └── option.ts              # 站点配置（域名唯一来源）
 │   ├── lib/
 │   │   ├── db.ts                  # D1 封装 + 查询计数器（dev 模式告警）
 │   │   ├── r2.ts                  # R2 读写封装 + 缓存头 + 批量删除
-│   │   ├── markdown.ts            # markdown-it 配置
-│   │   ├── sanitize.ts            # HTML 白名单清洗
+│   │   ├── markdown.ts            # markdown-it 配置 + 摘要/字数派生
+│   │   ├── sanitize.ts            # HTML 白名单清洗（js-xss）
 │   │   ├── auth.ts                # 签名 Cookie + PBKDF2
 │   │   ├── time.ts                # 年月归属 / W3C 日期 / RFC822（不用 Intl）
 │   │   └── url.ts                 # permalink → R2 key 映射（URL 形状的唯一来源）
@@ -874,7 +900,10 @@ cf-blog/
 ├── scripts/
 │   ├── import-typecho.ts          # Typecho 迁移（含全量渲染 + 写入 R2）
 │   ├── hash-password.ts           # 生成 PBKDF2 串
-│   └── bench-render.ts            # 渲染压测（§13.1 #4）：npx tsx 或 npm run bench:render
+│   ├── bench-render.ts            # 渲染压测（§13.1 #4）：npm run bench:render
+│   ├── e2e-runner.ts              # 本地端到端断言集（68 项）
+│   └── e2e-worker.ts              # e2e 的 Worker 入口，只在 wrangler.e2e.jsonc 里跑
+├── wrangler.e2e.jsonc             # 本地 e2e 专用配置（**不要拿它部署**）
 └── docs/
     ├── design.md                  # 本文档
     └── schema.sql
@@ -1017,6 +1046,24 @@ npx tsx scripts/import-typecho.ts --full-publish
 - **10 万请求/天仍然约束后台**，但后台请求量按每天几十次计，撞不上。真正要防的是有人拿脚本刷后台登录 —— 靠 Turnstile + 频率限制（§8.4）。
 - **D1 单库 500MB**。纯文本能存几十万篇文章；把图片 base64 塞进正文会迅速撑爆，附件必须走 R2。
 - **依赖自己的域名**。只有 `*.workers.dev` 时无法绑 R2 自定义域名，需回退到纯 Worker 方案（§14.1）。
+
+### 13.4 实现阶段抓到的坑（本地 e2e 的产出）
+
+发布流水线写完后，用「真实 workerd + 本地 D1/R2」跑了 68 项断言
+（`wrangler dev -c wrangler.e2e.jsonc` → `scripts/e2e-runner.ts`），抓到 3 个**只有跑起来才会暴露**的 bug。
+记在这里，因为它们都指向同一个设计教训：**快照必须是「渲染完备」的**。
+
+| # | 症状 | 原因 | 修法 |
+|---|---|---|---|
+| 1 | 文章页有骨架、没正文 | 为了让列表查询别拉正文，`listPublishedPosts` 省掉了 `rendered`；而 `siteTargets()` 恰恰是从**这个列表**造文章对象的 | 列表查询带上 `rendered`（D1 按 rows read 计费，不按字节）。要精简就另开一个查询给后台用 |
+| 2 | 文章页少了标签那一行、标签链接全丢 | 同一个原因：列表查询只聚合了分类，没聚合标签 | 列表查询聚合**分类 + 标签** |
+| 3 | 定时发布上线后是空壳页面 | Cron 只把 `waiting` 改成 `publish`，但这类文章从没走过「保存并发布」，`rendered` 一直是空的 | 加 `ensureRendered()`：写 R2 之前把 `rendered` 为空的内容补渲染（§6.4 的 Cron 兜底） |
+
+另外两个小的：
+
+- **`deletePost` 必须先删 D1 行再删对象**，否则后面的全站重建会把文章又写回去。
+- **独立页面不能复用文章的目标计算**：页面没有分类，`postKeyOf()` 会抛错；
+  而且页面不出现在首页/归档/Feed 里，只有它自己和 sitemap 需要重建。
 
 ---
 

@@ -1,0 +1,29 @@
+/**
+ * 本地 e2e 专用配置 —— 只有 `scripts/e2e-worker.ts` 用它，**不要用它部署**
+ *
+ *   npx wrangler d1 migrations apply blog-db --local
+ *   npx wrangler dev -c wrangler.e2e.jsonc --port 8788
+ *   curl -s http://127.0.0.1:8788/
+ *
+ * 绑定与 wrangler.jsonc 一致，所以本地 D1/R2 状态是同一个（.wrangler/state）。
+ * Worker 名故意不同：万一有人拿它 deploy，也只会创建一个一次性的测试 Worker。
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "cf-blog-e2e",
+	"main": "scripts/e2e-worker.ts",
+	"compatibility_date": "2026-09-26",
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "blog-db",
+			"database_id": "db93b235-4ad8-4391-8e4c-1e9a82473f07"
+		}
+	],
+	"r2_buckets": [
+		{
+			"bucket_name": "blog-content",
+			"binding": "BUCKET"
+		}
+	]
+}

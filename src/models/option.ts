@@ -7,6 +7,8 @@
  */
 
 import type { SiteInfo } from '../../theme/layout';
+import { createDb } from '../lib/db';
+import type { Db } from '../lib/db';
 
 /** 只依赖 DB 绑定，方便测试与复用（`c.env` 结构上满足这个形状） */
 export interface OptionsEnv {
@@ -79,13 +81,19 @@ function parseThemeOptions(raw: string | undefined): Record<string, unknown> {
 
 /** 读全局配置（带 isolate 内存缓存） */
 export async function getSiteOptions(env: OptionsEnv): Promise<SiteOptions> {
+	return await getSiteOptionsVia(createDb(env.DB, 'options'));
+}
+
+/**
+ * 同上，但走调用方给的 `Db`（这样发布流水线能把这次查询算进总量，见 §5.2 的查询预算）。
+ */
+export async function getSiteOptionsVia(db: Db): Promise<SiteOptions> {
 	if (cache && cache.expiresAt > Date.now()) return cache.value;
 
-	const { results } = await env.DB.prepare('SELECT name, value FROM options WHERE user = 0').all<{
-		name: string;
-		value: string | null;
-	}>();
-	const values = new Map(results.map((row) => [row.name, row.value ?? undefined]));
+	const rows = await db.all<{ name: string; value: string | null }>(
+		'SELECT name, value FROM options WHERE user = 0',
+	);
+	const values = new Map(rows.map((row) => [row.name, row.value ?? undefined]));
 
 	// site_url 必须显式配置：它错了，整站的 canonical / feed / sitemap 全错，宁可报错也别静默降级
 	const siteUrl = (values.get('site_url') ?? '').trim().replace(/\/+$/, '');

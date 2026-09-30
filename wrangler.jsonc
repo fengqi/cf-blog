@@ -40,6 +40,16 @@
 	 * Workers → 该 Worker → Settings → Domains & Routes 添加（见 docs/design.md §12.1）
 	 * 顺序要求：先确认 R2 自定义域名生效，再配这个。
 	 */
+	/**
+	 * Cron Triggers（见 docs/design.md §12.3）
+	 * 每小时一次，顺序做两件事：
+	 *   ① 发布到点的定时文章（status='waiting' AND created <= now）
+	 *   ② 扫 needs_sync = 1 的内容补发（D1 与 R2 的一致性兜底，§6.2）
+	 * 免费版账号共 5 个额度，这里只用 1 个。注意 Cron 调用按请求计费（每小时 1 次可忽略）。
+	 */
+	"triggers": {
+		"crons": ["0 * * * *"]
+	},
 	"observability": {
 		"enabled": true
 	},

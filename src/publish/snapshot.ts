@@ -2,13 +2,14 @@
  * 从 D1 装配一份站点快照 —— 设计文档 §5.2 / §6.1 第 5 步
  *
  * 这里是「查询预算」的落地点：**查询次数与文章数、标签数无关**。
- * 一共 6 次：
+ * 一共 7 次：
  *   1. options（站点配置）
- *   2. contents（可见文章 + 主分类聚合）
+ *   2. contents（可见文章 + 分类标签聚合）
  *   3. contents（独立页面）
- *   4. metas（分类与标签，含相关子查询数出来的 count）
- *   5. contents（年月分组）
- *   6. permalink_history（旧 URL 留痕）
+ *   4. contents（hidden 内容：只生成页面、不进列表）
+ *   5. metas（分类与标签，含相关子查询数出来的 count）
+ *   6. contents（年月分组）
+ *   7. permalink_history（旧 URL 留痕）
  *
  * 任何「查文章 → 循环查它的标签」都违反了 §1.4 铁律 4。
  */
@@ -16,6 +17,7 @@
 import type { Db } from '../lib/db';
 import { createDb } from '../lib/db';
 import {
+	listHiddenContent,
 	listMonths,
 	listPublishedPosts,
 	listRetiredPermalinks,
@@ -44,6 +46,7 @@ export async function loadSnapshot(env: SnapshotEnv, label = 'snapshot'): Promis
 	const options = await getSiteOptionsVia(db);
 	const allPosts = await listPublishedPosts(db);
 	const pages = await listStandalonePages(db);
+	const hidden = await listHiddenContent(db);
 	const terms = await listAllTerms(db);
 	const months = await listMonths(db, options.timezoneOffset);
 	const retired = await listRetiredPermalinks(db);
@@ -80,6 +83,7 @@ export async function loadSnapshot(env: SnapshotEnv, label = 'snapshot'): Promis
 			postsPerPage: options.postsPerPage,
 			posts,
 			pages,
+			hidden,
 			categories: terms.filter((term) => term.type === 'category'),
 			tags: terms.filter((term) => term.type === 'tag'),
 			months,

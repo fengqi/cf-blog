@@ -69,6 +69,7 @@ function toPostRecord(row: ContentRow, terms: TermRecord[], fallbackType: 'post'
 	return {
 		cid: row.cid,
 		type: row.type === 'page' ? 'page' : fallbackType,
+		status: row.status ?? 'publish',
 		title: row.title,
 		slug: row.slug,
 		created: row.created,
@@ -140,6 +141,23 @@ export async function listStandalonePages(db: Db): Promise<PostRecord[]> {
 		  ORDER BY c.sort_order, c.cid`,
 	);
 	return rows.map((row) => toPostRecord(row, [], 'page'));
+}
+
+/**
+ * `status='hidden'` 的文章与独立页面（一条 SQL 拿完，再按 type 分）。
+ *
+ * Typecho 的 hidden 语义是「有 URL、可访问，但不进列表」—— 线上实测这些 URL 全部 200，
+ * 所以迁移时必须照样生成页面，否则就是几十个 404（§5.1 的 URL 保全）。
+ */
+export async function listHiddenContent(db: Db): Promise<PostRecord[]> {
+	const rows = await db.all<ContentRow>(
+		`SELECT c.cid, c.title, c.slug, c.created, c.modified, c.rendered, c.excerpt, c.words, c.type, c.status,
+		        ${metaAggregate(null)} AS metas
+		   FROM contents c
+		  WHERE c.type IN ('post','page') AND c.status = 'hidden'
+		  ORDER BY c.created DESC, c.cid DESC`,
+	);
+	return rows.map((row) => toPostRecord(row, parseTerms(row.metas)));
 }
 
 /**
@@ -482,7 +500,7 @@ export async function markNeedsSync(db: Db, cids: number[]): Promise<void> {
 export async function listNeedsSyncCids(db: Db, limit = 20): Promise<number[]> {
 	const rows = await db.all<{ cid: number }>(
 		`SELECT cid FROM contents
-		  WHERE needs_sync = 1 AND type IN ('post','page') AND status = 'publish'
+		  WHERE needs_sync = 1 AND type IN ('post','page') AND status IN ('publish','hidden')
 		  ORDER BY modified ASC
 		  LIMIT ?`,
 		[limit],

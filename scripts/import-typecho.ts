@@ -567,21 +567,67 @@ function emitSql(db: DatabaseSync, maps: IdMaps, T: Tables): { files: string[]; 
 		);
 	}
 
-	// contents
+	/**
+	 * contents。
+	 *
+	 * ⚠️ 正文很长的文章**不能塞进一条 INSERT**：本地 D1（miniflare）对单条语句有上限，
+	 * 一条 36KB 的语句就报 `SQLITE_TOOBIG`，而且会让**整个文件回滚**。
+	 * 所以：正文先留空插入，再用 `body = body || '<分块>'` 逐块拼 —— 块大小保守取 8KB。
+	 */
+	const CHUNK_BYTES = 8000;
+	const needsChunking = (text: string) => text.length > CHUNK_BYTES;
 	for (const row of contents) {
+		const longText = needsChunking(row.body) || needsChunking(row.rendered);
 		statements.push(
 			`INSERT INTO contents (cid, title, slug, created, modified, body, rendered, excerpt, sort_order,
 			                       author_id, type, status, password, allow_feed, parent, words, mime, size, r2_key, needs_sync)
 			 VALUES (${sql(row.cid)}, ${sql(row.title)}, ${sql(row.slug)}, ${sql(row.created)}, ${sql(row.modified)},
-			         ${sql(row.body)}, ${sql(row.rendered)}, ${sql(row.excerpt)}, ${sql(row.sort_order)},
-			         ${sql(row.author_id)}, ${sql(row.type)}, ${sql(row.status)}, ${sql(row.password)},
-			         ${sql(row.allow_feed)}, ${sql(row.parent)}, ${sql(row.words)}, ${sql(row.mime)}, ${sql(row.size)},
-			         ${sql(row.r2_key)}, ${row.type === 'attachment' ? 0 : 1})
+			         ${longText ? "''" : sql(row.body)}, ${longText ? "''" : sql(row.rendered)}, ${sql(row.excerpt)},
+			         ${sql(row.sort_order)}, ${sql(row.author_id)}, ${sql(row.type)}, ${sql(row.status)},
+			         ${sql(row.password)}, ${sql(row.allow_feed)}, ${sql(row.parent)}, ${sql(row.words)},
+			         ${sql(row.mime)}, ${sql(row.size)}, ${sql(row.r2_key)}, ${row.type === 'attachment' ? 0 : 1})
 			 ON CONFLICT(cid) DO UPDATE SET title = excluded.title, slug = excluded.slug, body = excluded.body,
 			   rendered = excluded.rendered, excerpt = excluded.excerpt, modified = excluded.modified,
 			   type = excluded.type, status = excluded.status, words = excluded.words,
 			   needs_sync = excluded.needs_sync;`,
 		);
+		if (!longText) continue;
+		for (const [column, value] of [
+			['body', row.body],
+			['rendered', row.rendered],
+		] as const) {
+			for (let index = 0; index < value.length; index += CHUNK_BYTES) {
+				statements.push(
+					`UPDATE contents SET ${column} = ${column} || ${sql(value.slice(index, index + CHUNK_BYTES))} WHERE cid = ${row.cid};`,
+				);
+			}
+		}
+	}
+
+	/**
+	 * 多分类文章的非规范 URL → `permalink_history`（§5.1 方案 A）。
+	 *
+	 * 老站对这些 URL 返回 **301** 指向规范 URL（实测 `/go/632.html` → `/default/632.html`），
+	 * 而 R2 对象发不了 301，所以按方案 A 处理：旧地址照常 200，页面里 canonical 指向规范地址。
+	 * 不记的话，这类 URL 在新站会变成 404。
+	 */
+	const nowSeconds = Math.floor(Date.now() / 1000);
+	for (const row of rows<{ cid: number; slug: string; cats: string | null }>(
+		db,
+		`SELECT c.cid, ${q(slugColumn)} AS slug,
+		        (SELECT GROUP_CONCAT(m.slug) FROM ${T.relationships} r JOIN ${T.metas} m ON m.mid = r.mid
+		          WHERE r.cid = c.cid AND m.type = 'category' ORDER BY m.mid) AS cats
+		   FROM ${T.contents} c
+		  WHERE c.type = 'post' AND c.status IN ('publish','hidden')`,
+	)) {
+		const categories = String(row.cats ?? '').split(',').filter(Boolean);
+		if (categories.length < 2 || !keptCids.has(Number(row.cid))) continue;
+		for (const category of categories.slice(1)) {
+			statements.push(
+				`INSERT OR REPLACE INTO permalink_history (cid, permalink, retired_at)
+				 VALUES (${row.cid}, ${sql(`${category}/${row.slug || row.cid}.html`)}, ${nowSeconds});`,
+			);
+		}
 	}
 
 	// relationships（只保留已导入的 cid）
@@ -780,12 +826,21 @@ function applySql(files: string[], target: 'local' | 'remote'): void {
 		const path = join(SQL_DIR, file);
 		console.log(`  → ${target}: ${file}`);
 		try {
-			execFileSync('npx', ['wrangler', 'd1', 'execute', 'blog-db', `--${target}`, `--file=${path}`, '--yes'], {
-				encoding: 'utf8',
-				stdio: ['ignore', 'pipe', 'pipe'],
-			});
+			const stdout = execFileSync(
+				'npx',
+				['wrangler', 'd1', 'execute', 'blog-db', `--${target}`, `--file=${path}`, '--yes'],
+				{ encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+			);
+			/**
+			 * ⚠️ wrangler 对「语句级错误」是**退码 0 + 输出里带 success:false**：
+			 * 之前把 stdout 收起来不看，结果一批语句整批回滚都没发现（本地彩排卡了很久）。
+			 * 所以这里必须主动扫输出。
+			 */
+			if (/"success":\s*false/.test(stdout) || /\bERROR\b/.test(stdout)) {
+				console.error(stdout.slice(0, 4000));
+				throw new Error(`${file} 执行有失败语句（见上面的 wrangler 输出）`);
+			}
 		} catch (error) {
-			// 失败时把 wrangler 的输出原样打出来，否则只剩一句 exit code 没法排查
 			const failure = error as { stdout?: string; stderr?: string };
 			console.error(failure.stdout ?? '');
 			console.error(failure.stderr ?? '');

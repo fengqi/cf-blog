@@ -89,6 +89,7 @@ function buildSnapshot(): SiteSnapshot {
 		posts.push({
 			cid: 1000 - index,
 			type: 'post',
+			status: 'publish',
 			title: `第 ${index + 1} 篇压测文章：${category.name} 相关`,
 			slug: `bench-${1000 - index}`,
 			created,
@@ -122,6 +123,7 @@ function buildSnapshot(): SiteSnapshot {
 		{
 			cid: 1,
 			type: 'page',
+			status: 'publish',
 			title: 'About',
 			slug: 'about',
 			created: start,
@@ -134,6 +136,7 @@ function buildSnapshot(): SiteSnapshot {
 		{
 			cid: 2,
 			type: 'page',
+			status: 'publish',
 			title: 'Guest',
 			slug: 'guest',
 			created: start,
@@ -150,6 +153,7 @@ function buildSnapshot(): SiteSnapshot {
 		postsPerPage: 10,
 		posts,
 		pages,
+		hidden: [],
 		categories,
 		tags: tags.filter((tag) => tag.count > 0),
 		months,

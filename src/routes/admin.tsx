@@ -23,7 +23,7 @@ import {
 } from '../models/content';
 import { ensureTags, listTerms } from '../models/meta';
 import { getSiteOptions } from '../models/option';
-import { deletePost, publishPost } from '../publish/pipeline';
+import { deletePost, publishPost, rebuildTargetsSlice } from '../publish/pipeline';
 import { reconcileNeedsSync } from '../publish/sync';
 import { hasUrl, postKeyOf } from '../publish/targets';
 import { PostEditorPage } from '../views/post-editor';
@@ -276,4 +276,24 @@ adminRoutes.post('/admin/rebuild/batch', async (c) => {
 		failed: report.failed,
 		needsSync: report.needsSync,
 	});
+});
+
+/**
+ * 全站重渲的**分批执行端**（§6.5）：一次写一批对象，脚本循环调用直到 `nextOffset` 为 null。
+ *
+ *   offset=0 & limit=50 → 写第 0~49 个对象，返回 nextOffset=50
+ *
+ * 与 `/admin/rebuild`（标脏交给 Cron）的区别：这条路径覆盖**全部对象**，
+ * 包括那些只挂在草稿上的标签归档 —— 改了模板必须用它才能真正刷全。
+ */
+adminRoutes.post('/admin/rebuild/full', async (c) => {
+	const form = await c.req.formData().catch(() => null);
+	const offset = Number.parseInt(String(form?.get('offset') ?? c.req.query('offset') ?? '0'), 10);
+	const limit = Number.parseInt(String(form?.get('limit') ?? c.req.query('limit') ?? '50'), 10);
+	const report = await rebuildTargetsSlice(
+		c.env,
+		Number.isFinite(offset) && offset > 0 ? offset : 0,
+		Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 50,
+	);
+	return c.json(report);
 });

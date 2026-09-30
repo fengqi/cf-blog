@@ -58,7 +58,7 @@ export async function reconcileNeedsSync(env: PublishEnv, limit = 20): Promise<S
 	await ensureRendered(env, snapshot, cids);
 
 	const wanted = new Set(cids);
-	const dirty = [...snapshot.posts, ...snapshot.pages].filter((record) => wanted.has(record.cid));
+	const dirty = [...snapshot.posts, ...snapshot.pages, ...snapshot.hidden].filter((record) => wanted.has(record.cid));
 
 	const byKey = new Map<string, Target>();
 	for (const record of dirty) {

@@ -106,6 +106,12 @@ export function siteTargets(snapshot: SiteSnapshot): Target[] {
 			kind: 'page' as const,
 			post: page,
 		})),
+		// hidden：只生成页面，不进列表/归档/Feed/sitemap（Typecho 语义）
+		...snapshot.hidden.map((record) =>
+			record.type === 'page'
+				? { key: standaloneKeyOf(record), kind: 'page' as const, post: record }
+				: { key: postKeyOf(record), kind: 'post' as const, post: record },
+		),
 		...snapshot.categories.flatMap((term) => termTargets(term, perPage, categoryKey)),
 		...snapshot.tags.flatMap((term) => termTargets(term, perPage, tagKey)),
 		...monthTargets(snapshot),
@@ -172,8 +178,23 @@ export function pagePublishTargets(snapshot: SiteSnapshot, page: PostRecord): Ta
 	return siteTargets(snapshot).filter((target) => wanted.has(target.key));
 }
 
-/** 按内容类型分发 —— 调用方不该自己去判断这是文章还是独立页面 */
+/**
+ * 按内容类型与状态分发 —— 调用方不该自己去判断这是文章还是独立页面。
+ *
+ * `hidden` 只重建它自己（+ 它自己的旧 URL）：它不进列表、不进归档、不进 Feed/sitemap，
+ * 所以改了它不会影响任何共享对象。
+ */
 export function contentPublishTargets(snapshot: SiteSnapshot, record: PostRecord): Target[] {
+	if (record.status === 'hidden') {
+		const own: Target =
+			record.type === 'page'
+				? { key: standaloneKeyOf(record), kind: 'page', post: record }
+				: { key: postKeyOf(record), kind: 'post', post: record };
+		const retired: Target[] = snapshot.retired
+			.filter((entry) => entry.cid === record.cid)
+			.map((entry) => ({ key: entry.key, kind: 'post', post: record, canonicalPath: entry.canonicalPath }));
+		return [own, ...retired];
+	}
 	return record.type === 'page'
 		? pagePublishTargets(snapshot, record)
 		: postPublishTargets(snapshot, record);

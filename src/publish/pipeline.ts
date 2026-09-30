@@ -134,7 +134,7 @@ export async function ensureRendered(
 	cids?: number[],
 ): Promise<number[]> {
 	const wanted = cids ? new Set(cids) : undefined;
-	const pending = [...snapshot.posts, ...snapshot.pages].filter(
+	const pending = [...snapshot.posts, ...snapshot.pages, ...snapshot.hidden].filter(
 		(record) => record.html === '' && (!wanted || wanted.has(record.cid)),
 	);
 
@@ -168,9 +168,10 @@ export async function publishPost(
 	const post = await getContentByCid(db, cid);
 	if (!post) throw new Error(`cid=${cid} 在写入后读不到，数据异常`);
 
-	// 草稿 / 私密 / 待发布都不产出 R2 对象（§10：静态直出下「私密文章」降级为不发布）
+	// 草稿 / 私密 / 待发布都不产出 R2 对象（§10：静态直出下「私密文章」降级为不发布）；
+	// `hidden` 例外：它有 URL、可访问，只是不进列表 —— 线上这些 URL 都是 200，必须照旧生成
 	const status = await getContentStatus(db, cid);
-	if (status !== 'publish') {
+	if (status !== 'publish' && status !== 'hidden') {
 		return {
 			cid,
 			skipped: `status=${status ?? 'unknown'} 不产出静态对象`,
@@ -240,6 +241,34 @@ export async function publishAll(env: PublishEnv): Promise<PublishReport> {
 		total: objects.length,
 		sync: outcome,
 		needsSync: await countNeedsSync(db),
+	};
+}
+
+/**
+ * 全站分批重建：按 `siteTargets` 的**下标切片**，一次写一批（§6.5）。
+ *
+ * 为什么粒度是「对象」而不是「内容」：`reconcileNeedsSync` 是按脏内容重建的，
+ * 它只会覆盖「文章自己的」标签归档；而**只挂在草稿上的标签**（本库有 76 个，线上仍是 200）
+ * 永远轮不到。主题/模板变更后的全站重渲必须走这条路径，才能覆盖每一个对象。
+ *
+ * 目标清单是确定性的（同一份 D1 数据 → 同一个顺序），所以偏移量可以跨请求使用。
+ */
+export async function rebuildTargetsSlice(
+	env: PublishEnv,
+	offset = 0,
+	limit = 50,
+): Promise<{ total: number; offset: number; written: number; failed: string[]; nextOffset: number | null }> {
+	const { snapshot } = await loadSnapshot(env, 'publish:slice');
+	const targets = siteTargets(snapshot);
+	const slice = targets.slice(offset, offset + limit);
+	const objects = renderTargets(snapshot, slice);
+	const outcome = await writeObjects(env.BUCKET, objects);
+	return {
+		total: targets.length,
+		offset,
+		written: outcome.written.length,
+		failed: outcome.failed.map((item) => item.key),
+		nextOffset: offset + limit < targets.length ? offset + limit : null,
 	};
 }
 

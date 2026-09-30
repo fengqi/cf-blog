@@ -78,15 +78,16 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	await run('DELETE FROM relationships');
 	await run('DELETE FROM permalink_history');
 	await run('DELETE FROM contents');
-	await run('DELETE FROM metas WHERE mid >= 20');
+	// 只保留 schema 种子里的默认分类（mid=1），其余分类/标签全部清掉，保证夹具可重复
+	await run('DELETE FROM metas WHERE mid <> 1');
 	await run("UPDATE metas SET name = 'Other', slug = 'default', description = '生活琐事' WHERE mid = ?", [CATEGORY_MID]);
 	await run("INSERT OR REPLACE INTO options (name, user, value) VALUES ('timezone', 0, '28800')");
 	await run("INSERT OR REPLACE INTO options (name, user, value) VALUES ('posts_per_page', 0, '10')");
 	// options 在 isolate 内有 60 秒缓存，夹具改了配置必须主动失效（§7.3）
 	clearSiteOptionsCache();
 
-	await run("INSERT INTO metas (mid, name, slug, type, description, count, sort_order, parent) VALUES (20, '安卓', '安卓', 'tag', NULL, 0, 0, 0)");
-	await run("INSERT INTO metas (mid, name, slug, type, description, count, sort_order, parent) VALUES (21, 'Cloudflare', 'cloudflare', 'tag', NULL, 0, 0, 0)");
+	await run("INSERT OR REPLACE INTO metas (mid, name, slug, type, description, count, sort_order, parent) VALUES (20, '安卓', '安卓', 'tag', NULL, 0, 0, 0)");
+	await run("INSERT OR REPLACE INTO metas (mid, name, slug, type, description, count, sort_order, parent) VALUES (21, 'Cloudflare', 'cloudflare', 'tag', NULL, 0, 0, 0)");
 
 	const now = Math.floor(Date.now() / 1000);
 	for (let index = 0; index < 12; index++) {
@@ -139,14 +140,24 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 		[now, now],
 	);
 	await run('INSERT INTO relationships (cid, mid) VALUES (300, ?)', [CATEGORY_MID]);
-	check('12 篇文章（1 篇 waiting）+ 1 页面 + 1 草稿', true);
+
+	// 隐藏文章：Typecho 的 hidden 语义 —— 有 URL、可访问，但不进列表/Feed/sitemap
+	await run(
+		`INSERT INTO contents (cid, title, slug, created, modified, body, rendered, excerpt, sort_order,
+		                       author_id, type, status, allow_feed, parent, words, needs_sync)
+		 VALUES (112, '隐藏文章标题', 'hidden-one', ?, ?, '# 隐藏正文\n\n不进列表。', '', '', 0, 1, 'post', 'hidden', 1, 0, 0, 1)`,
+		[now - 90000, now - 90000],
+	);
+	await run('INSERT INTO relationships (cid, mid) VALUES (112, ?)', [CATEGORY_MID]);
+
+	check('12 篇文章（1 篇 waiting）+ 1 hidden + 1 页面 + 1 草稿', true);
 
 	// -----------------------------------------------------------------------
 	// 1. 快照查询预算（§5.2）
 	// -----------------------------------------------------------------------
 	lines.push('=== 快照查询预算 ===');
 	const loaded = await loadSnapshot({ DB: env.DB });
-	check('查询次数 = 6（与文章数、标签数无关）', loaded.queries === 6, `实际 ${loaded.queries}`);
+	check('查询次数 = 7（与文章数、标签数无关）', loaded.queries === 7, `实际 ${loaded.queries}`);
 	check('可见文章 11 篇（12 篇里 1 篇 waiting）', loaded.snapshot.posts.length === 11, `实际 ${loaded.snapshot.posts.length}`);
 	check('独立页面 1 个', loaded.snapshot.pages.length === 1);
 	check('分类 1 个、标签 2 个', loaded.snapshot.categories.length === 1 && loaded.snapshot.tags.length === 2);
@@ -180,6 +191,21 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('feed 与 sitemap 已生成', keys.includes('feed/') && keys.includes('sitemap.xml'));
 	check('草稿没有产出对象', !keys.some((key) => key.includes('draft-one')));
 	check('waiting 文章没有产出对象', !keys.includes('default/post-12.html'));
+
+	// hidden：有页面，但不进列表 / Feed / sitemap（Typecho 语义）
+	check('hidden 文章有页面对象', keys.includes('default/hidden-one.html'));
+	const homeHtml = (await (await env.BUCKET.get(''))?.text()) ?? '';
+	check('hidden 不出现在首页列表', !homeHtml.includes('隐藏文章标题'));
+	const indexPage1 = (await (await env.BUCKET.get('page/1/'))?.text()) ?? '';
+	check('hidden 不出现在分页里', !indexPage1.includes('隐藏文章标题'));
+	const categoryHtml = (await (await env.BUCKET.get('category/default/'))?.text()) ?? '';
+	check('hidden 不出现在分类归档', !categoryHtml.includes('隐藏文章标题'));
+	const earlySitemap = (await (await env.BUCKET.get('sitemap.xml'))?.text()) ?? '';
+	const earlyFeed = (await (await env.BUCKET.get('feed/'))?.text()) ?? '';
+	check('hidden 不进 sitemap', !earlySitemap.includes('hidden-one'));
+	check('hidden 不进 feed', !earlyFeed.includes('隐藏文章标题'));
+	const hiddenHtml = (await (await env.BUCKET.get('default/hidden-one.html'))?.text()) ?? '';
+	check('hidden 页面正文正常渲染', hiddenHtml.includes('隐藏正文'));
 
 	// 注意：R2 的 list() 不返回 httpMetadata（和 S3 一致），要看缓存头必须 head/get
 	const homeMeta = (await env.BUCKET.head(''))?.httpMetadata;

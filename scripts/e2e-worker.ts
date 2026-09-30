@@ -9,6 +9,7 @@
  * 它跑的是真实 workerd + 真实 D1/R2 绑定，比 mock 更接近线上。
  */
 
+import { rebuildTargetsSlice } from '../src/publish/pipeline';
 import { reconcileNeedsSync } from '../src/publish/sync';
 import { runE2E } from './e2e-runner';
 import type { E2EEnv } from './e2e-runner';
@@ -42,6 +43,11 @@ export default {
 			} while (cursor);
 			if (keys.length > 0) await env.BUCKET.delete(keys);
 			return Response.json({ deleted: keys.length });
+		}
+		if (url.pathname === '/full') {
+			const offset = Number.parseInt(url.searchParams.get('offset') ?? '0', 10);
+			const limit = Number.parseInt(url.searchParams.get('limit') ?? '50', 10);
+			return Response.json(await rebuildTargetsSlice(env, offset, limit));
 		}
 		if (url.pathname === '/keys') {
 			const keys: string[] = [];

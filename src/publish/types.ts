@@ -23,6 +23,11 @@ export interface PostRecord {
 	cid: number;
 	/** post = 文章（URL 两段），page = 独立页面（URL 单段） */
 	type: 'post' | 'page';
+	/**
+	 * publish | hidden | draft | private | waiting
+	 * `hidden` 的语义（沿用 Typecho）：**有 URL、打得开，但不进列表/归档/Feed/sitemap**。
+	 */
+	status: string;
 	title: string;
 	/** URL 片段，可能含中文 */
 	slug: string;
@@ -58,6 +63,11 @@ export interface SiteSnapshot {
 	posts: PostRecord[];
 	/** 独立页面，按 sort_order */
 	pages: PageRecord[];
+	/**
+	 * `status='hidden'` 的文章与独立页面：只参与「生成页面」，不参与列表/归档/Feed/sitemap。
+	 * 单独放一个数组，是为了让「可访问但不进列表」这件事在数据层就显式可见。
+	 */
+	hidden: PostRecord[];
 	categories: TermRecord[];
 	tags: TermRecord[];
 	/** 有文章的年月，倒序 */

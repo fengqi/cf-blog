@@ -95,10 +95,18 @@ header.top .top-inner {
 }
 
 header.top .brand { font-weight: 700; color: var(--text); margin-right: 0.35rem; }
+header.top a.brand:hover { color: var(--accent); text-decoration: none; }
 header.top a { color: var(--text-soft); }
 header.top a:hover { color: var(--accent); text-decoration: none; }
 header.top .spacer { flex: 1; }
-header.top .hint { font-size: 0.8125rem; }
+
+/* 行内小按钮（退出）：贴着导航文字的尺寸，别压过一行 */
+header.top form { margin: 0; }
+header.top button {
+	padding: 0.1rem 0.55rem;
+	font-size: 0.8438rem;
+	font-weight: 400;
+}
 
 /* --- 主容器 --- */
 
@@ -218,6 +226,20 @@ form.stack .actions button[type=submit]:hover {
 
 .actions { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
 .actions button, .actions a.button { padding: 0.35rem 0.8rem; font-weight: 400; }
+/* actions 行里的表单是布局单元，不是文档流里的块 —— 否则按钮和文字对不齐 */
+.actions form, .filter-bar form { margin: 0; }
+
+/* 列表筛选条：一行排开，窄屏换行 */
+.filter-bar {
+	display: flex;
+	gap: 0.6rem;
+	align-items: center;
+	flex-wrap: wrap;
+	margin: 0 0 1rem;
+}
+.filter-bar input[type=text] { flex: 1 1 12rem; width: auto; }
+.filter-bar select { flex: 0 1 auto; width: auto; }
+.filter-bar button, .filter-bar a.button { padding: 0.35rem 0.8rem; font-weight: 400; }
 
 /* --- 登录页 --- */
 
@@ -257,7 +279,7 @@ export function AdminLayout(props: AdminLayoutProps) {
 				{props.user ? (
 					<header class="top">
 						<div class="top-inner">
-							<span class="brand">博客后台</span>
+							<a class="brand" href="/admin">博客后台</a>
 							<a href="/admin">文章</a>
 							<a href="/admin/posts/new">写文章</a>
 							<a href="/admin/categories">分类</a>
@@ -265,7 +287,7 @@ export function AdminLayout(props: AdminLayoutProps) {
 							<a href="/admin/settings">设置</a>
 							<a href="/admin/password">口令</a>
 							<span class="spacer" />
-							<span class="hint">{props.user.screen_name || props.user.username}</span>
+							<a href="/admin/front" target="_blank">前台 ↗</a>
 							<form method="post" action="/admin/logout">
 								<button type="submit">退出</button>
 							</form>

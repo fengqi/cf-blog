@@ -58,7 +58,12 @@ export function CategoriesPage(props: CategoriesPageProps) {
 				/>
 			))}
 			{props.categories.map((term) => (
-				<form id={`delete-${term.mid}`} method="post" action={`/admin/categories/${term.mid}/delete`} />
+				<form
+					id={`delete-${term.mid}`}
+					method="post"
+					action={`/admin/categories/${term.mid}/delete`}
+					onsubmit="return confirm('确定删除该分类？主分类挂在它名下的文章会换地址（旧地址保留跳转）')"
+				/>
 			))}
 			<table>
 				<thead>

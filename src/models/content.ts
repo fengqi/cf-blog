@@ -216,15 +216,42 @@ export interface AdminPostRow {
  * 后台文章列表 —— **刻意不回捞 `rendered`**（§5.2：要精简查询就单独开一个，
  * 别去动 `listPublishedPosts`，那个是给渲染用的，必须「渲染完备」）。
  */
-export async function listAdminPosts(db: Db, limit = 200): Promise<AdminPostRow[]> {
+/** 后台列表筛选（§6.5）：关键词匹配标题/缩略名，状态精确，分类按关系表 */
+export interface AdminPostFilter {
+	q?: string;
+	status?: string;
+	categoryMid?: number;
+}
+
+export async function listAdminPosts(
+	db: Db,
+	limit = 200,
+	filter: AdminPostFilter = {},
+): Promise<AdminPostRow[]> {
+	const where: string[] = ["c.type IN ('post','page')"];
+	const params: (string | number)[] = [];
+	if (filter.q) {
+		where.push('(c.title LIKE ? OR c.slug LIKE ?)');
+		const like = `%${filter.q}%`;
+		params.push(like, like);
+	}
+	if (filter.status) {
+		where.push('c.status = ?');
+		params.push(filter.status);
+	}
+	if (filter.categoryMid !== undefined) {
+		where.push('EXISTS (SELECT 1 FROM relationships fr WHERE fr.cid = c.cid AND fr.mid = ?)');
+		params.push(filter.categoryMid);
+	}
+	params.push(limit);
 	const rows = await db.all<ContentRow & { needs_sync: number }>(
 		`SELECT c.cid, c.title, c.slug, c.type, c.status, c.created, c.modified, c.words,
 		        c.needs_sync, c.excerpt, ${metaAggregate('category')} AS categories
 		   FROM contents c
-		  WHERE c.type IN ('post','page')
+		  WHERE ${where.join(' AND ')}
 		  ORDER BY c.created DESC, c.cid DESC
 		  LIMIT ?`,
-		[limit],
+		params,
 	);
 	return rows.map((row) => ({
 		cid: row.cid,

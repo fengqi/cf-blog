@@ -119,18 +119,37 @@ function messageForReport(action: string, report: { skipped?: string; sync?: { w
 adminRoutes.get('/admin', async (c) => {
 	const db = createDb(c.env.DB, 'admin');
 	const options = await getSiteOptions(c.env);
-	const [posts, needsSync] = await Promise.all([listAdminPosts(db), countNeedsSync(db)]);
+	const q = (c.req.query('q') ?? '').trim();
+	const status = c.req.query('status') ?? '';
+	const categoryMid = Number(c.req.query('category'));
+	const [posts, needsSync, categories] = await Promise.all([
+		listAdminPosts(db, 200, {
+			q: q || undefined,
+			status: status || undefined,
+			categoryMid: Number.isFinite(categoryMid) && categoryMid > 0 ? categoryMid : undefined,
+		}),
+		countNeedsSync(db),
+		listTerms(db, 'category'),
+	]);
 
 	return c.html(
 		<PostListPage
 			posts={posts}
 			needsSync={needsSync}
+			categories={categories}
+			filters={{ q, status, categoryMid: Number.isFinite(categoryMid) && categoryMid > 0 ? categoryMid : '' }}
 			user={c.var.user}
 			siteTimezoneOffset={options.timezoneOffset}
 			message={c.req.query('message')}
 			error={c.req.query('error')}
 		/>,
 	);
+});
+
+/** 右上角「前台」入口：跳到站点规范域名（site_url，见设置页） */
+adminRoutes.get('/admin/front', async (c) => {
+	const options = await getSiteOptions(c.env);
+	return c.redirect(options.siteUrl || '/admin', 302);
 });
 
 adminRoutes.get('/admin/settings', async (c) => {

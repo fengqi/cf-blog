@@ -589,6 +589,24 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	const listHtml = await listPage.text();
 	check('登录后能进文章列表', listPage.status === 200 && listHtml.includes('第 2 篇'));
 	check('重渲按钮带分批循环脚本（待办 ⑥）', listHtml.includes('id="rebuild-form"') && listHtml.includes('/admin/rebuild/full'));
+	check('页头有品牌首页链接、前台入口、删除确认', listHtml.includes('class="brand"') && listHtml.includes('/admin/front') && listHtml.includes('onsubmit='));
+	check('列表带筛选条（关键词/状态/分类）', listHtml.includes('name="q"') && listHtml.includes('name="status"') && listHtml.includes('name="category"'));
+	check('操作栏带「修改」入口', listHtml.includes('/admin/posts/101/edit') && listHtml.includes('/preview/101'));
+
+	const qPage = await call('/admin?q=post-3', { headers: { cookie: sessionCookie } });
+	const qHtml = await qPage.text();
+	check('关键词筛出唯一匹配（slug=post-3）', qPage.status === 200 && qHtml.includes('第 3 篇') && !qHtml.includes('第 2 篇'));
+
+	const draftPage = await call('/admin?status=draft', { headers: { cookie: sessionCookie } });
+	const draftHtml = await draftPage.text();
+	check('状态筛选 draft 只剩草稿', draftPage.status === 200 && draftHtml.includes('>草稿<') && !draftHtml.includes('第 2 篇'));
+
+	const catFilterPage = await call(`/admin?category=${CATEGORY_MID}`, { headers: { cookie: sessionCookie } });
+	const catFilterHtml = await catFilterPage.text();
+	check('分类筛出该分类全部文章', catFilterPage.status === 200 && catFilterHtml.includes('第 2 篇'));
+	const emptyCatPage = await call('/admin?category=999', { headers: { cookie: sessionCookie } });
+	const emptyCatHtml = await emptyCatPage.text();
+	check('筛到无文章的分类显示空态', emptyCatPage.status === 200 && !emptyCatHtml.includes('第 2 篇') && emptyCatHtml.includes('还没有内容'));
 
 	// 后台设置页：SSR 表单保存 options（§6.1 / §7.3）
 	lines.push('=== 后台设置页 ===');

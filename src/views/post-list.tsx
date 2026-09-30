@@ -7,12 +7,17 @@
  */
 
 import type { AdminPostRow } from '../models/content';
+import type { TermRecord } from '../publish/types';
 import { formatDate } from '../../theme/layout';
 import { AdminLayout } from './layout';
 
 export interface PostListPageProps {
 	posts: AdminPostRow[];
 	needsSync: number;
+	/** 分类下拉选项（筛选用） */
+	categories: TermRecord[];
+	/** 当前生效的筛选（回填表单；空串 = 没筛） */
+	filters: { q: string; status: string; categoryMid: number | '' };
 	user: { screen_name: string | null; username: string };
 	message?: string;
 	error?: string;
@@ -29,6 +34,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 export function PostListPage(props: PostListPageProps) {
 	const offset = props.siteTimezoneOffset ?? 8;
+	const hasFilter = Boolean(props.filters.q || props.filters.status || props.filters.categoryMid);
 	return (
 		<AdminLayout title="文章 · 博客后台" user={props.user} message={props.message} error={props.error}>
 			<div class="actions" style="margin-bottom:1rem">
@@ -41,8 +47,36 @@ export function PostListPage(props: PostListPageProps) {
 				<span id="rebuild-progress" class="hint" role="status">
 					{props.needsSync > 0 ? <span class="badge dirty">待同步 {props.needsSync}</span> : null}
 				</span>
-				<span class="hint">共 {props.posts.length} 条</span>
+				<span class="hint">
+					{hasFilter ? `筛出 ${props.posts.length} 条` : `共 ${props.posts.length} 条`}
+				</span>
 			</div>
+
+			<form method="get" action="/admin" class="filter-bar">
+				<input type="text" name="q" placeholder="标题 / 缩略名" value={props.filters.q ?? ''} />
+				<select name="status" aria-label="按状态筛选">
+					<option value="">全部状态</option>
+					<option value="publish" selected={props.filters.status === 'publish'}>已发布</option>
+					<option value="draft" selected={props.filters.status === 'draft'}>草稿</option>
+					<option value="waiting" selected={props.filters.status === 'waiting'}>待发布</option>
+					<option value="hidden" selected={props.filters.status === 'hidden'}>隐藏</option>
+					<option value="private" selected={props.filters.status === 'private'}>私密</option>
+				</select>
+				<select name="category" aria-label="按分类筛选">
+					<option value="">全部分类</option>
+					{props.categories.map((term) => (
+						<option value={term.mid} selected={props.filters.categoryMid === term.mid}>
+							{term.name}
+						</option>
+					))}
+				</select>
+				<button type="submit">筛选</button>
+				{hasFilter ? (
+					<a class="button" href="/admin">
+						清除
+					</a>
+				) : null}
+			</form>
 
 			<table>
 				<thead>
@@ -73,10 +107,17 @@ export function PostListPage(props: PostListPageProps) {
 							<td class="hint">{formatDate(post.created, offset)}</td>
 							<td>
 								<div class="actions">
+									<a class="button" href={`/admin/posts/${post.cid}/edit`}>
+										修改
+									</a>
 									<a class="button" href={`/preview/${post.cid}`} target="_blank">
 										预览
 									</a>
-									<form method="post" action={`/admin/posts/${post.cid}/delete`}>
+									<form
+										method="post"
+										action={`/admin/posts/${post.cid}/delete`}
+										onsubmit="return confirm('确定删除？删除后文章页与旧地址一起失效，不可恢复')"
+									>
 										<button class="danger" type="submit">删除</button>
 									</form>
 								</div>

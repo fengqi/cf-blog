@@ -589,6 +589,9 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	const listHtml = await listPage.text();
 	check('登录后能进文章列表', listPage.status === 200 && listHtml.includes('第 2 篇'));
 	check('列表有渲染维护入口、待同步徽标链到渲染页', listHtml.includes('/admin/render') && !listHtml.includes('id="rebuild-form"'));
+	const qSinglePage = await call('/admin?q=post-3', { headers: { cookie: sessionCookie } });
+	const qSinglePageHtml = await qSinglePage.text();
+	check('筛选后只有一页时不渲染分页条', qSinglePage.status === 200 && !qSinglePageHtml.includes('<nav class="admin-pagination"'));
 
 	const renderPage = await call('/admin/render', { headers: { cookie: sessionCookie } });
 	const renderHtml = await renderPage.text();
@@ -948,6 +951,34 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('新口令能登录', pwRelogin.status === 303);
 	const pwOldLogin = await postForm('/admin/login', { username: 'admin', password: 'e2e-口令-123' });
 	check('旧口令被拒', pwOldLogin.status === 401);
+
+	// -----------------------------------------------------------------------
+	// 后台分页：塞 55 篇填充文章把列表顶过一页（放套件最末尾，不影响前面的断言）
+	// -----------------------------------------------------------------------
+	lines.push('=== 后台分页 ===');
+	const pageLogin = await postForm('/admin/login', { username: 'admin', password: '新的口令-456' });
+	const pageCookie = (pageLogin.headers.get('set-cookie') ?? '').split(';')[0];
+	for (let index = 0; index < 55; index++) {
+		const cid = 500 + index;
+		const created = now - 7200 - index * 60; // 比正主文章旧，排在列表尾部
+		await run(
+			`INSERT INTO contents (cid, title, slug, created, modified, body, rendered, excerpt, sort_order,
+			                       author_id, type, status, allow_feed, parent, words, needs_sync)
+			 VALUES (?, ?, ?, ?, ?, ?, '', '', 0, 1, 'post', 'publish', 1, 0, 0, 0)`,
+			[cid, `分页填充文章 ${index + 1}`, `pgfill-${index + 1}`, created, created, '填充正文。'],
+		);
+		await run('INSERT INTO relationships (cid, mid) VALUES (?, ?)', [cid, CATEGORY_MID]);
+	}
+	const page1 = await call('/admin', { headers: { cookie: pageCookie } });
+	const page1Html = await page1.text();
+	check('第 1 页出现下一页链接', page1.status === 200 && page1Html.includes('/admin?page=2'));
+	check('第 1 页不含第 2 页的文章', !page1Html.includes('分页填充文章 51'));
+	const page2 = await call('/admin?page=2', { headers: { cookie: pageCookie } });
+	const page2Html = await page2.text();
+	check('第 2 页只有填充文章', page2.status === 200 && page2Html.includes('分页填充文章 51') && !page2Html.includes('第 2 篇'));
+	const page2Filtered = await call(`/admin?q=${encodeURIComponent('分页')}&page=2`, { headers: { cookie: pageCookie } });
+	const page2FilteredHtml = await page2Filtered.text();
+	check('翻页链接背着筛选参数', page2Filtered.status === 200 && page2FilteredHtml.includes('分页填充文章 51'));
 
 	// -----------------------------------------------------------------------
 	// 产物（交给外部 XML 校验）

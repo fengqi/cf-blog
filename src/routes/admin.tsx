@@ -12,6 +12,7 @@ import { hashPassword, PBKDF2_ITERATIONS, verifyPassword } from '../lib/auth';
 import { categoryKey, pageCount, postKey } from '../lib/url';
 import { parseDateTimeLocal } from '../lib/time';
 import {
+	countAdminPosts,
 	countNeedsSync,
 	createAttachment,
 	createContent,
@@ -123,19 +124,27 @@ adminRoutes.get('/admin', async (c) => {
 	const q = (c.req.query('q') ?? '').trim();
 	const status = c.req.query('status') ?? '';
 	const categoryMid = Number(c.req.query('category'));
-	const [posts, needsSync, categories] = await Promise.all([
-		listAdminPosts(db, 200, {
-			q: q || undefined,
-			status: status || undefined,
-			categoryMid: Number.isFinite(categoryMid) && categoryMid > 0 ? categoryMid : undefined,
-		}),
+	const page = Math.max(1, Number.parseInt(c.req.query('page') ?? '1', 10) || 1);
+	const pageSize = 50;
+	const filter = {
+		q: q || undefined,
+		status: status || undefined,
+		categoryMid: Number.isFinite(categoryMid) && categoryMid > 0 ? categoryMid : undefined,
+	};
+	const [posts, total, needsSync, categories] = await Promise.all([
+		listAdminPosts(db, pageSize, filter, (page - 1) * pageSize),
+		countAdminPosts(db, filter),
 		countNeedsSync(db),
 		listTerms(db, 'category'),
 	]);
+	const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
 	return c.html(
 		<PostListPage
 			posts={posts}
+			total={total}
+			page={page}
+			totalPages={totalPages}
 			needsSync={needsSync}
 			categories={categories}
 			filters={{ q, status, categoryMid: Number.isFinite(categoryMid) && categoryMid > 0 ? categoryMid : '' }}

@@ -12,6 +12,10 @@ import { AdminLayout } from './layout';
 
 export interface PostListPageProps {
 	posts: AdminPostRow[];
+	/** 当前筛选下的总条数（分页用） */
+	total: number;
+	page: number;
+	totalPages: number;
 	needsSync: number;
 	/** 分类下拉选项（筛选用） */
 	categories: TermRecord[];
@@ -34,6 +38,15 @@ const STATUS_LABEL: Record<string, string> = {
 export function PostListPage(props: PostListPageProps) {
 	const offset = props.siteTimezoneOffset ?? 8;
 	const hasFilter = Boolean(props.filters.q || props.filters.status || props.filters.categoryMid);
+	/** 分页链接要背着当前筛选走，不然翻一页筛选就丢了 */
+	const pageUrl = (page: number): string => {
+		const params = new URLSearchParams();
+		if (props.filters.q) params.set('q', props.filters.q);
+		if (props.filters.status) params.set('status', props.filters.status);
+		if (props.filters.categoryMid) params.set('category', String(props.filters.categoryMid));
+		params.set('page', String(page));
+		return `/admin?${params.toString()}`;
+	};
 	return (
 		<AdminLayout title="文章 · 博客后台" user={props.user} message={props.message} error={props.error}>
 			<div class="actions" style="margin-bottom:1rem">
@@ -51,7 +64,7 @@ export function PostListPage(props: PostListPageProps) {
 					) : null}
 				</span>
 				<span class="hint">
-					{hasFilter ? `筛出 ${props.posts.length} 条` : `共 ${props.posts.length} 条`}
+					{hasFilter ? `筛出 ${props.total} 条` : `共 ${props.total} 条`}
 				</span>
 			</div>
 
@@ -129,7 +142,41 @@ export function PostListPage(props: PostListPageProps) {
 					))}
 				</tbody>
 			</table>
-			{props.posts.length === 0 ? <p class="hint">还没有内容。</p> : null}
+			{props.posts.length === 0 ? (
+				props.page > 1 ? (
+					<p class="hint">
+						这一页没有内容，<a href={pageUrl(1)}>回到第一页</a>。
+					</p>
+				) : (
+					<p class="hint">还没有内容。</p>
+				)
+			) : null}
+
+			{props.totalPages > 1 ? (
+				<nav class="admin-pagination" aria-label="列表分页">
+					{props.page > 1 ? (
+						<a class="button" href={pageUrl(props.page - 1)}>
+							上一页
+						</a>
+					) : (
+						<span class="button" aria-disabled="true">
+							上一页
+						</span>
+					)}
+					<span class="hint">
+						第 {props.page} / {props.totalPages} 页
+					</span>
+					{props.page < props.totalPages ? (
+						<a class="button" href={pageUrl(props.page + 1)}>
+							下一页
+						</a>
+					) : (
+						<span class="button" aria-disabled="true">
+							下一页
+						</span>
+					)}
+				</nav>
+			) : null}
 		</AdminLayout>
 	);
 }

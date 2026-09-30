@@ -257,6 +257,16 @@ form.stack .actions button[type=submit]:hover {
 .group-buttons { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.6rem; }
 .group-buttons button { padding: 0.25rem 0.7rem; font-size: 0.8438rem; font-weight: 400; }
 
+/* 列表分页条 */
+.admin-pagination {
+	display: flex;
+	gap: 1rem;
+	align-items: center;
+	justify-content: center;
+	margin-top: 1.5rem;
+}
+.admin-pagination .button[aria-disabled='true'] { opacity: 0.45; pointer-events: none; }
+
 /* --- 登录页 --- */
 
 .login {

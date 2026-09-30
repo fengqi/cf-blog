@@ -223,11 +223,15 @@ export interface AdminPostFilter {
 	categoryMid?: number;
 }
 
-export async function listAdminPosts(
-	db: Db,
-	limit = 200,
-	filter: AdminPostFilter = {},
-): Promise<AdminPostRow[]> {
+/** 后台列表筛选（§6.5）：关键词匹配标题/缩略名，状态精确，分类按关系表 */
+export interface AdminPostFilter {
+	q?: string;
+	status?: string;
+	categoryMid?: number;
+}
+
+/** 组装筛选 WHERE —— 列表查询与计数查询共用，保证两边口径一致 */
+function adminPostWhere(filter: AdminPostFilter): { sql: string; params: (string | number)[] } {
 	const where: string[] = ["c.type IN ('post','page')"];
 	const params: (string | number)[] = [];
 	if (filter.q) {
@@ -243,14 +247,31 @@ export async function listAdminPosts(
 		where.push('EXISTS (SELECT 1 FROM relationships fr WHERE fr.cid = c.cid AND fr.mid = ?)');
 		params.push(filter.categoryMid);
 	}
-	params.push(limit);
+	return { sql: where.join(' AND '), params };
+}
+
+/** 筛选条件下的内容总数（分页用），与 listAdminPosts 同一口径 */
+export async function countAdminPosts(db: Db, filter: AdminPostFilter = {}): Promise<number> {
+	const { sql, params } = adminPostWhere(filter);
+	const rows = await db.all<{ count: number }>(`SELECT COUNT(*) AS count FROM contents c WHERE ${sql}`, params);
+	return rows[0]?.count ?? 0;
+}
+
+export async function listAdminPosts(
+	db: Db,
+	limit = 200,
+	filter: AdminPostFilter = {},
+	offset = 0,
+): Promise<AdminPostRow[]> {
+	const { sql, params } = adminPostWhere(filter);
+	params.push(limit, offset);
 	const rows = await db.all<ContentRow & { needs_sync: number }>(
 		`SELECT c.cid, c.title, c.slug, c.type, c.status, c.created, c.modified, c.words,
 		        c.needs_sync, c.excerpt, ${metaAggregate('category')} AS categories
 		   FROM contents c
-		  WHERE ${where.join(' AND ')}
+		  WHERE ${sql}
 		  ORDER BY c.created DESC, c.cid DESC
-		  LIMIT ?`,
+		  LIMIT ? OFFSET ?`,
 		params,
 	);
 	return rows.map((row) => ({

@@ -49,12 +49,16 @@
 	 * 目录与锚点都是**服务端**产出的（见 theme/toc.ts），这里只负责上色。
 	 * 脚本不跑、或者锚点 id 被改坏，目录依然是可点的链接 —— 只是没有高亮。
 	 *
-	 * 只处理后端渲染的右栏目录（`.post-toc`）：窄屏那份是 `<details>` 里的，
-	 * 用户点开才看，而且窄屏下 `.post-toc` 是 `display:none`（`offsetParent` 为 null），
-	 * 于是这里会直接跳过，不做无用的滚动监听。
+	 * 只处理后端渲染的那份目录（`.post-toc`）：窄屏那份是 `<details>` 里的，用户点开
+	 * 才看，而窄屏下 `.post-toc` 是 `display:none`，这里就该跳过、不做无用的滚动监听。
+	 *
+	 * ⚠️ 判断「看得见吗」**不能用 `offsetParent`** —— 宽屏下 `.post-toc` 是
+	 * `position: fixed`（浮在容器右边的留白里），而 fixed 元素的 `offsetParent`
+	 * 恒为 `null`，用它判断会让滚动高亮在宽屏下静默失效。
+	 * `getClientRects()` 对 `display:none` 返回空列表、对 fixed 元素正常返回，正合适。
 	 */
 	var tocBox = document.querySelector('.post-toc');
-	if (tocBox && tocBox.offsetParent !== null) {
+	if (tocBox && tocBox.getClientRects().length > 0) {
 		var tocLinks = {};
 		var tocAnchors = tocBox.querySelectorAll('.toc-list a');
 		for (var t = 0; t < tocAnchors.length; t++) {

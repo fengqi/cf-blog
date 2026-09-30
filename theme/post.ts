@@ -125,8 +125,9 @@ export function renderPost(context: PostContext): string {
 	/**
 	 * 目录出现两遍是**故意的**：
 	 *   - `.post-toc-inline`（`<details>`）给窄屏，用原生折叠，不需要 JS；
-	 *   - `.post-toc`（右栏）给宽屏，sticky 跟着正文。
-	 * CSS 按 `62rem` 断点二选一显示。只出现一次的方案要么需要 JS 搬 DOM，
+	 *   - `.post-toc` 给宽屏，`fixed` 钉在容器右边的留白里，跟着滚动高亮。
+	 * CSS 按视口宽度二选一显示（断点与定位见 style.css 的「11. 响应式」）。
+	 * 只出现一次的方案要么需要 JS 搬 DOM，
 	 * 要么得给 `<details>` 做「宽屏强制展开」的 hack（`open` 由 UA 控制，CSS 盖不住）。
 	 */
 	const inlineToc =
@@ -152,13 +153,14 @@ ${contentHtml}
 
 	/**
 	 * `.post-body` **两种版式都要有**：正文列宽由它的网格轨道决定
-	 * （见 style.css 的 `.post-layout`）。无目录时少了这层包裹，正文会直接铺满 62rem。
+	 * （见 style.css 的 `.post-layout`）。少了这层包裹，正文会直接铺满整个容器、
+	 * 跟另一种版式错开。
 	 */
 	const body = `		<div class="post-body">
 ${article}
 		</div>`;
 
-	// 没有 h2/h3 的文章（短文、纯代码笔记）不渲染空目录栏，正文自己居中即可
+	// 没有 h2/h3 的文章（短文、纯代码笔记）不渲染空目录栏 —— 版式和有目录的文章完全一样
 	const content =
 		toc.length > 0
 			? `	<div class="post-layout post-layout--with-toc">
@@ -181,14 +183,16 @@ ${body}
 		canonicalPath: context.canonicalPath || post.url,
 		nav: context.nav,
 		/**
-		 * 版式宽度**跟着内容走，不跟着「是文章还是页面」走**：
-		 *   - 有目录 → 62rem，给 `42rem 正文 + 14rem 右栏` 两列留位置；
-		 *   - 没目录 → 44rem，和首页 / 索引页同一档。
-		 * 这里**必须按 `toc.length` 判断，不能恒给 `post`** —— 独立页面（`/about.html` 等）
-		 * 和没有 h2/h3 的短文章本来就只有一列，恒给 62rem 会让它们顶着一个比首页宽一截的
-		 * 外壳、正文缩在中间：页头和正文都跟其他页对不齐（`.layout-narrow` 的容器内宽 664px
-		 * 正好等于列表页的正文宽度）。
+		 * **全站一个宽度档：44rem。**
+		 *
+		 * 目录不再靠「把容器撑到 62rem」来腾位置 —— 宽屏时它浮在容器右边的留白里，
+		 * 窄屏折叠进正文顶部（见 style.css 的「11. 响应式」）。容器宽度与内容无关，
+		 * 页头 / 页脚 / 正文的左边缘在全站任意两个页面之间都完全重合。
+		 *
+		 * 曾经这里按 `toc.length` 给 `'post'`（62rem）：文章页的页头比首页宽 288px，
+		 * 正文还得靠 `.post-body` 再收窄一次，两条边都对不齐；独立页面和没写小标题的
+		 * 短文更顶着 62rem 的空外壳。那个宽度档已经废掉。
 		 */
-		width: toc.length > 0 ? 'post' : 'narrow',
+		width: 'narrow',
 	});
 }

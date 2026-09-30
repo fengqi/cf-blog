@@ -929,7 +929,7 @@ cf-blog/
 ├── migrations/
 │   └── 0001_init.sql              # 即 docs/schema.sql
 ├── theme/                         # ★ 主题源文件，发布时渲染并写入 R2
-│   ├── layout.ts                  # 页面骨架（唯一主题）：顶栏导航、注入指纹资源、按页型限宽
+│   ├── layout.ts                  # 页面骨架（唯一主题）：顶栏导航、注入指纹资源、全站限宽 44rem
 │   ├── html.ts                    # 转义与日期格式化（纯函数，谁都能引）
 │   ├── toc.ts                     # 文章目录：抽 h2/h3、生成锚点 id、把 id 写回正文
 │   ├── assets.ts                  # 主题资源访问器（路径 / `<link>` / `<script>` 标签）
@@ -981,7 +981,7 @@ cf-blog/
 │   ├── hash-password.ts           # 生成 PBKDF2 串
 │   ├── build-assets.ts            # 主题资源打指纹 → theme/assets.generated.ts
 │   ├── bench-render.ts            # 渲染压测（§13.1 #4）：npm run bench:render
-│   ├── e2e-runner.ts              # 本地端到端断言集（141 项）
+│   ├── e2e-runner.ts              # 本地端到端断言集（142 项）
 │   ├── e2e-worker.ts              # e2e 的 Worker 入口，只在 wrangler.e2e.jsonc 里跑
 │   ├── upload-attachments.ts      # 附件迁移：按原路径把 usr/uploads 写进 R2
 │   └── publish-worker.ts          # 生产发布专用（只有 /full、/keys），配 wrangler.publish.jsonc
@@ -1002,20 +1002,25 @@ cf-blog/
 是全局可变数据，挂在文章页上会让「发一篇文章」理论上失效 765 个页面。
 去掉侧栏后，可变数据只活在 3 个索引页对象里。
 
-**容器宽度按「有没有第二列」分档**（`layout.ts` 的 `width` 选项 → `body` 上的类，
-由 `theme/post.ts` 按 `toc.length` 决定）：
+**容器宽度全站一档：44rem**（`layout.ts` 的 `width` 选项 → `body` 上的类；
+`theme/post.ts` 等一律传 `narrow`）：
 
 | 类 | 宽度 | 用在 | 为什么 |
 |---|---|---|---|
-| `.layout-narrow` | 44rem | 首页 / 分页 / 归档 / 索引页 / **独立页面 / 没有 h2-h3 的文章** | 去掉侧栏后按 1080px 渲染，中文摘要一行能塞六十多个字；实测 664px 内容宽 ≈ 44 个汉字 |
-| `.layout-post` | 62rem | **有目录**的文章页 | 宽度留给「正文 + 右侧目录」两栏 |
+| `.layout-narrow` | 44rem | **所有页面**：首页 / 分页 / 归档 / 索引页 / 独立页面 / 文章页 | 去掉侧栏后按 1080px 渲染，中文一行能塞六十多个字；实测 664px 内容宽 ≈ 44 个汉字 |
+| （不加类） | 1080px | 暂无 | `width: 'default'` 时 `body` 上不输出类，走 `.container` 的基础值；留给将来真的需要宽幅的页面（图集、宽表） |
 
-分档看的是**列数，不是页型**。早期实现里 `theme/post.ts` 恒给 `width: 'post'`，于是
-`/about.html`（独立页面）和没写小标题的短文也顶着 62rem 的外壳：正文 672px 缩在 992px 里居中、
-页头比首页宽 288px，和列表页对不齐。现在没有目录一律走 44rem —— 容器内宽 664px 正好等于
-列表页的正文宽度，`/about.html` 的正文左边缘与首页列表完全重合（实测都在 x=308）。
+页头 / 页脚 / 正文 / 列表共用同一个容器，所以任意两个页面的左边缘、右边缘、正文宽度
+**完全重合**（实测 1280px 下首页 / `/categories/` / `/about.html` / 文章页都是 704 / 664 / x=308）。
 
-页头 / 页脚跟着一起收 —— 只有正文收窄、页头仍铺满会像错位。
+宽度这块踩过两轮，值得记下来：
+
+1. 最初 `theme/post.ts` 恒给 `width: 'post'`（62rem）。于是 `/about.html` 这种独立页面和
+   没写小标题的短文也顶着 62rem 的外壳：正文 672px 缩在 992px 里居中、页头比首页宽 288px。
+2. 改成「按 `toc.length` 判断该不该 62rem」后 `/about.html` 对上了，但**仍是两档** ——
+   有目录的文章页页头依然比列表页宽一截，两条边对不齐。
+3. 现在把第二档整个废掉：目录不再靠「把容器撑宽」腾位置，而是**浮到容器外面的留白里**。
+   容器宽度从此与页面内容无关，两档变一档，`/about.html` 那类修正也不再需要特判。
 
 **文章目录（TOC）在服务端生成**（`theme/toc.ts`）：
 
@@ -1026,18 +1031,26 @@ cf-blog/
 - **不在客户端扫 DOM**：那样要等 JS 跑完才插入目录，首屏会先塌后撑（CLS），
   而且服务端产出的目录**没有 JS 也能看、也能点**。
 
-**目录在 HTML 里出现两遍**，CSS 按 `62rem` 断点二选一 —— 显隐完全由 CSS 决定，零 JS：
+**目录在 HTML 里出现两遍**，CSS 按视口宽度二选一 —— 显隐完全由 CSS 决定，零 JS：
 
-| 元素 | 断点 | 形态 |
+| 元素 | 出现条件 | 形态 |
 |---|---|---|
-| `.post-toc`（`<aside>`） | ≥62.01rem | 右栏 sticky（`top: 2rem`） |
-| `.post-toc-inline`（`<details>`） | ≤62rem | 正文顶部可折叠块，用原生 `<details>` |
+| `.post-toc`（`<aside>`） | ≥76rem | 浮在容器**右侧的留白**里：`position: fixed`、`top: 2.5rem`、`left: calc(50% + 23rem)`、宽 14rem、比视口高就自己滚 |
+| `.post-toc-inline`（`<details>`） | <76rem | 正文顶部可折叠块，用原生 `<details>` |
+
+76rem 是算出来的：目录宽 14rem，要 `50% + 23rem + 14rem ≤ 100%`，即视口 ≥ 74rem，再留 2rem 余量。
+
+**为什么用 `fixed` 而不是 `sticky`**：`sticky` 要求元素仍在文档流里，那样它就必须占一列、
+容器就必须变宽 —— 又回到两档宽度的老问题。`fixed` 让它彻底脱离文档流，页面永远是单列 44rem，
+目录不占正文一个像素，而 `fixed` 的钉住效果本就等于 sticky 的最终形态。
 
 为什么不做成一份：`<details>` 的展开由 `open` 属性控制，**CSS 盖不住它**，
 想「宽屏强制展开」就得靠 JS 搬 DOM —— 两份静态 HTML 更可靠，代价是每篇多几百字节。
 
 滚动高亮（当前小节变色）由 `theme/assets/app.js` 打类，纯增量：脚本不跑就只是普通链接。
-它只处理宽屏那份目录（窄屏下 `.post-toc` 是 `display:none`，隔一层 `offsetParent` 判断直接跳过，不做无用的滚动监听）。
+它只处理宽屏那份目录。⚠️ 判断「目录到底看不看得见」用的是 `getClientRects()`，
+**绝不能用 `offsetParent`** —— `position: fixed` 元素的 `offsetParent` 恒为 `null`，
+拿它当显隐判据会在宽屏下静默关掉整个滚动高亮（不会报错，只是不亮）。
 另外 `prefers-reduced-motion` 下所有过渡关闭。
 
 后台 JSX 的两条纪律：
@@ -1203,13 +1216,20 @@ npx tsx scripts/import-typecho.ts --full-publish
   CSS Grid 里 grid item 带 `auto` 外边距会**放弃 stretch、退化成「内容宽度」** ——
   42rem 的正文列实际只有 340px，而 `computedStyle` 里的 `max-width` 依然是 `672px`，
   从样式面板完全看不出问题。修法：列宽交给网格轨道
-  （`grid-template-columns: minmax(0, min(42rem, 100%)) 14rem`），
-  `.post-body` 上不写外边距。**验证方式只能是量 `getBoundingClientRect`。**
+  （当时是 `grid-template-columns: minmax(0, min(42rem, 100%)) 14rem`，第二列后来随目录
+  `fixed` 化一起删掉了），`.post-body` 上不写外边距。
+  **验证方式只能是量 `getBoundingClientRect`。**
 - **无目录的文章漏了宽度包裹**：「有目录 / 无目录」两条模板分支里只有一条输出了 `.post-body`，
-  于是 `/about.html` 这类没有 h2/h3 的页面正文直接铺满 62rem。修法：两种版式都必须有这层包裹。
+  于是 `/about.html` 这类没有 h2/h3 的页面正文直接铺满整个容器（当时 62rem）却读作「正常」。
+  修法：两种版式都必须有这层包裹。
+- **`offsetParent` 判显隐会在 `position: fixed` 上静默失效**（2026-09-30，目录改成浮层那次）：
+  它原本只是用来跳过窄屏 `display:none` 的目录、不做无用的滚动监听。目录改成 `fixed` 之后
+  `offsetParent` 恒为 `null`，于是**宽屏下整个滚动高亮被静默关掉** —— 不报错、不报警告，
+  目录照常显示、照常可点，只是永远不亮。修法：用 `getClientRects().length > 0` 判「看得见吗」。
 
-> 这两条是同一类：**模板分支和 CSS 都"看着对"，但实测宽度不对**。
-> 截图肉眼也不容易发现（差 2 倍宽度在整页截图里不明显），只有量数字才暴露。
+> 这三条是同一类：**模板分支和 CSS 都"看着对"，但实测行为不对**。
+> 截图肉眼也不容易发现（差 2 倍宽度在整页截图里不明显；滚动高亮不亮更是要滚一下才知道），
+> 只有量数字、或者真在浏览器里操作一次才暴露。
 
 ---
 
@@ -1399,7 +1419,7 @@ Typecho 很可能对两个候选都返回 200（文章同时属于两个分类�
 - **主题 CSS 已补齐**（2026-09-30）：指纹化写入 R2 + `<link>` 注入 + 暗色模式，见 §7.2。
 - **导航与版式改版**（2026-09-30，见 §5.1 / §11.1）：全站去掉侧栏，导航收进顶栏，
   新增 `/categories/`、`/tags/`、`/archives/` 三个索引页（纯新增 URL），
-  文章页加服务端生成的两级目录，容器按「有没有第二列」分档（有目录 62rem、其余 44rem，§11.1）。
+  文章页加服务端生成的两级目录，容器宽度**全站一档 44rem**（§11.1）。
   删除路径从「全站重写 800 个对象」收敛到「按影响面约 35 个」（§5.3）。
 - **索引页列为「已知边界」**：删掉某个月最后一篇文章时，那个月份对象会永久留在 R2 上（§5.3）。
   与旧实现一致，不是这次引入的。

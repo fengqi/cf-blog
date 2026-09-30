@@ -39,13 +39,15 @@ export interface NavLink {
 }
 
 /**
- * 页面容器宽度。三档，由 `body` 上的类控制（见 style.css 的「容器宽度」一节）：
+ * 页面容器宽度。由 `body` 上的类控制（见 style.css 的「容器宽度」一节）：
  *   - `default` 1080px —— 目前没有页面用它，留给将来需要宽幅的页面
- *   - `narrow`   44rem  —— 首页/分页/归档/索引页：**只有列表，没有侧栏**，
- *                          不限制宽度的话一行能塞六十多个汉字
- *   - `post`     62rem  —— 文章页：正文 + 右侧目录两栏，宽度算给正文用
+ *   - `narrow`   44rem  —— 目前**所有**页面：列表 / 分页 / 归档 / 索引页 / 独立页面 / 文章页。
+ *                          不限制宽度的话一行能塞六十多个汉字，所以上限收在 44rem。
+ *                          文章页的目录**不占正文宽度**（宽屏浮在容器右边的留白里，
+ *                          窄屏折叠进正文顶部），所以「有目录」不需要更宽的容器 ——
+ *                          全站一个宽度档就够，页头 / 页脚 / 正文的左边缘处处重合。
  */
-export type LayoutWidth = 'default' | 'narrow' | 'post';
+export type LayoutWidth = 'default' | 'narrow';
 
 export interface LayoutOptions {
 	site: SiteInfo;

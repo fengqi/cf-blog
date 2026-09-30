@@ -276,11 +276,8 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('hidden 不进 feed', !earlyFeed.includes('隐藏文章标题'));
 	const hiddenHtml = (await (await env.BUCKET.get('default/hidden-one.html'))?.text()) ?? '';
 	check('hidden 页面正文正常渲染', hiddenHtml.includes('隐藏正文'));
-	// 宽度分档看「有没有第二列」，不看「文章还是列表」：这篇只有 h1，没有 h2/h3 → 无目录 → 44rem
-	check(
-		'没有 h2/h3 的短文章走列表页那档宽度（`.layout-narrow`）',
-		hiddenHtml.includes('<body class="layout-narrow">') && !hiddenHtml.includes('<body class="layout-post">'),
-	);
+	// 全站一个宽度档（§11.1）：容器恒 44rem，目录浮在容器右边的留白里，不再把容器撑宽
+	check('没有 h2/h3 的短文章与列表页同宽（`.layout-narrow`）', hiddenHtml.includes('<body class="layout-narrow">'));
 
 	// 注意：R2 的 list() 不返回 httpMetadata（和 S3 一致），要看缓存头必须 head/get
 	const homeMeta = (await env.BUCKET.head(''))?.httpMetadata;
@@ -384,10 +381,14 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('文章页同样注入指纹 CSS link', articleHtml.includes(themeAssetPath('style.css')));
 	check(
 		'文章页骨架完整（顶栏导航 + 主题切换按钮 + 尾部脚本）',
-		articleHtml.includes('<body class="layout-post">') &&
-			articleHtml.includes('<a href="/categories/">分类</a>') &&
+		articleHtml.includes('<a href="/categories/">分类</a>') &&
 			articleHtml.includes('data-theme-toggle') &&
 			articleHtml.includes(`<script src="${themeAssetPath('app.js')}" defer></script>`),
+	);
+	// 全站同宽：有目录的文章页也不额外加宽，目录自己浮到容器右边的留白里（§11.1）
+	check(
+		'有目录的文章页与列表页同宽（`.layout-narrow`，`.layout-post` 已废弃）',
+		articleHtml.includes('<body class="layout-narrow">') && !articleHtml.includes('layout-post'),
 	);
 	check('文章页不再有侧栏', !articleHtml.includes('class="sidebar"'));
 	// 目录是**服务端**抽取的（theme/toc.ts）：锚点 id 与目录链接在同一次渲染里产生
@@ -494,10 +495,9 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 		'没有 h2/h3 的页面不渲染目录',
 		!pageHtml.includes('<aside class="post-toc"') && !pageHtml.includes('post-toc-inline'),
 	);
-	// 同一条规则的另一半：没有目录就不该撑 62rem 的宽外壳，否则页头/正文都跟首页对不齐
 	check(
-		'独立页面走列表页那档宽度（`.layout-narrow`）',
-		pageHtml.includes('<body class="layout-narrow">') && !pageHtml.includes('<body class="layout-post">'),
+		'独立页面与列表页同宽（`.layout-narrow`）',
+		pageHtml.includes('<body class="layout-narrow">') && !pageHtml.includes('layout-post'),
 	);
 
 	// -----------------------------------------------------------------------

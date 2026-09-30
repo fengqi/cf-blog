@@ -277,21 +277,20 @@ hr {
    ========================================================================== */
 
 /*
- * 容器宽度按页面类型分档（body 上的类，来自 theme/layout.ts 的 `width` 选项）：
- *   .layout-narrow 44rem —— 首页 / 分页 / 归档 / 索引页 / **没有目录的文章与独立页面**。
- *                          这些页面只有一列，按 1080px 渲染的话中文一行能塞六十多个字，读起来很累。
- *   .layout-post   62rem —— **有目录**的文章页。宽度留给「正文 + 右侧目录」两栏，
- *                          正文自己再收窄到 42rem（见 `.post-body`）。
- * 分档看的是**有没有第二列**，不是「文章还是列表」—— 所以 `/about.html` 和没写小标题的
- * 短文也走 44rem，页头页脚和正文都跟首页对齐（见 `theme/post.ts` 的 `width` 那一段）。
- * 页头 / 页脚跟着一起收 —— 只有正文收窄、页头仍铺满，视觉上会像错位。
+ * **全站一个宽度档：44rem。**
+ * 页头 / 页脚 / 正文 / 列表都在同一个容器里 —— 首页、分类页、关于页、文章页量出来
+ * 是同一个矩形，左边缘、右边缘、正文宽度三者处处一致。
+ * 中文一行塞六十多个字读起来很累，所以上限收在 44rem（内容宽 664px ≈ 44 个汉字）。
+ *
+ * 文章页的目录**不占正文宽度**：宽屏时它浮在容器右边的留白里，窄屏折叠进正文顶部
+ * （见「11. 响应式」）。所以「有目录」不需要更宽的容器。
+ *
+ * 这里曾经分过两档 —— 有目录的文章页给 62rem 撑出右栏的位置。代价是文章页的页头
+ * 比首页宽 288px、正文还得靠 `.post-body` 再收窄一次，两条边都对不齐；
+ * `/about.html` 那种独立页面更顶着 62rem 的空外壳。已废掉。
  */
 .layout-narrow .container {
 	max-width: 44rem;
-}
-
-.layout-post .container {
-	max-width: 62rem;
 }
 
 .site-main {
@@ -389,23 +388,20 @@ hr {
 }
 
 /* ==========================================================================
-   6. 文章页：正文 + 右侧目录
+   6. 文章页：正文 + 目录
    ========================================================================== */
 
 /*
- * 目录在 HTML 里出现**两遍**（宽屏右栏 `<aside>` / 窄屏 `<details>`），
- * 这里按 62rem 断点二选一 —— 显隐完全由 CSS 决定，不需要任何 JS。
+ * 正文列。全站一档 44rem，**有目录的文章也不改容器宽度** —— 目录浮到容器右边的
+ * 留白里，不进网格、不占正文宽度，所以这里**永远只有一列**。
+ *
+ * 目录在 HTML 里出现**两遍**（宽屏留白里的 `<aside>` / 窄屏正文顶部的 `<details>`），
+ * 显隐按视口宽度二选一（见「11. 响应式」），零 JS。
  * 为什么不只用一份：`<details>` 的展开由 `open` 属性控制，CSS 盖不住它，
  * 想「宽屏强制展开」就得靠 JS 搬 DOM，那还不如两份静态 HTML 来得可靠。
  */
 .post-layout {
 	display: grid;
-	gap: 3rem;
-	align-items: start;
-	/*
-	 * 单列（无目录）。这时 body 上是 `.layout-narrow`，容器内宽 664px < 42rem，
-	 * 所以这一列直接撑满 —— 正文宽度与列表页完全一致。
-	 */
 	grid-template-columns: minmax(0, min(42rem, 100%));
 	justify-content: center;
 }
@@ -415,6 +411,8 @@ hr {
  * 实测踩过：grid item 带 `auto` 外边距会退化成「内容宽度」，
  * 42rem 的正文被挤成 340px（内容只有几行中文那么宽），而 `max-width` 还是 672px ——
  * 从 computed style 完全看不出问题，只有量 `getBoundingClientRect` 才暴露。
+ *
+ * `min-width: 0` 让长代码块 / 宽表格压在列宽里自己滚，别把网格撑破。
  */
 .post-body {
 	min-width: 0;
@@ -445,6 +443,10 @@ hr {
 
 /* --- 目录 --- */
 
+/*
+ * 下面只管排印。**显隐和定位在「11. 响应式」**：默认不显示，视口够宽时才浮到
+ * 容器右边的留白里（`position: fixed`）。
+ */
 .post-toc {
 	font-size: 0.875rem;
 	line-height: 1.6;
@@ -776,25 +778,37 @@ hr {
    11. 响应式
    ========================================================================== */
 
-/* 宽屏：目录固定在右栏，正文里的折叠目录收起来 */
-@media (min-width: 62.01rem) {
-	.post-layout--with-toc {
-		grid-template-columns: minmax(0, min(42rem, 100%)) 14rem;
-	}
+/*
+ * 目录的位置只有两种形态：够宽时浮在容器右侧的留白里，其余宽度折叠进正文顶部。
+ *
+ * 用 `position: fixed` 而不是 `sticky`：这个 `<aside>` 本来就落在 44rem 正文内容的
+ * 外面，`fixed` 让它彻底脱离文档流 —— 不进网格、不占正文宽度，页面始终是单列。
+ * 它的包含块是视口，`left: calc(50% + 23rem)` 就落在 44rem 容器（`50% ± 22rem`）
+ * 右边缘之外 1rem，与正文之间再自然留出一截间距。
+ *
+ * 断点 76rem 是算出来的：目录宽 14rem，要 `50% + 23rem + 14rem ≤ 100%`，
+ * 即视口 ≥ 74rem；再留 2rem 余量。比这窄的时候右边留白放不下，改看正文里的 `<details>`。
+ *
+ * ⚠️ `position: fixed` 的元素 `offsetParent` 恒为 `null`，所以 `theme/assets/app.js`
+ * 判断「目录可见吗」用的是 `getClientRects()`，不能用 `offsetParent`。
+ */
+.post-toc {
+	display: none;
+}
 
-	.post-toc {
-		position: sticky;
-		top: 2rem;
+@media (min-width: 76rem) {
+	.post-layout--with-toc .post-toc {
+		display: block;
+		position: fixed;
+		top: 2.5rem;
+		left: calc(50% + 23rem);
+		width: 14rem;
+		/* 目录比视口还长时自己滚，别把尾部条目顶出屏幕 */
+		max-height: calc(100vh - 5rem);
+		overflow-y: auto;
 	}
 
 	.post-toc-inline {
-		display: none;
-	}
-}
-
-/* 窄屏：右栏目录整个不出现，改看正文里的 `<details>` */
-@media (max-width: 62rem) {
-	.post-toc {
 		display: none;
 	}
 }

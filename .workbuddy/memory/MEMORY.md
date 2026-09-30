@@ -28,15 +28,24 @@
   不做下拉；清单落在 `/categories/`、`/tags/`、`/archives/`（新增 URL）。
   动机是一致性：侧栏里的计数/最新文章是**全局可变数据**，挂在文章页上会让「发一篇」理论上失效 765 个页面。
   `theme/components/sidebar.ts` 已删除。
-- **容器宽度分档看「有没有第二列」，不看页型**（`layout.ts` 的 `width` → body 类，
-  由 `theme/post.ts` 按 `toc.length` 决定）：`.layout-post` 62rem（**有目录**的文章）、
-  其余一律 `.layout-narrow` 44rem（列表页 / 分页 / 索引页 / **独立页面 / 没写 h2-h3 的短文**）。
-  44rem 的容器内宽 664px 正好等于列表页正文宽度，所以 `/about.html` 的正文左边缘和首页列表重合。
-  ⚠️ 曾经在 `post.ts` 里**恒给 `width: 'post'`**，`/about.html` 因此顶着 62rem 外壳（正文缩中间、
-  页头宽 288px），被风息看出来 —— 改版新增版式时先想清楚「这一页有几列」。
+- **容器宽度全站一档 44rem**（`layout.ts` 的 `width` → body 类；所有页面都传 `narrow`，
+  `theme/post.ts` 也不例外）。页头 / 页脚 / 正文 / 列表共用同一个容器，任意两页的左边缘、
+  右边缘、正文宽度**完全重合**（实测 1280px 下都是 `x=288 w=704`，正文列 `x=308 w=664`）。
+  - 演进史（两轮踩坑）：① 最初 `post.ts` **恒给 `width: 'post'`**，`/about.html` 顶着 62rem
+    外壳（正文缩中间、页头宽 288px）；② 改成按 `toc.length` 给档，`/about.html` 对上了但
+    文章页仍是另一档、页头仍不齐；③ **62rem 那档整个废掉** —— 目录浮到容器右边的留白里，
+    不再靠撑宽容器腾位置。`LayoutWidth` 现在只有 `'default' | 'narrow'`。
+  - 教训：容器宽度一旦和「页面有几列」耦合，就会长出第二种宽度、永远对不齐。**宽度只跟可读性有关。**
 - **文章目录在服务端生成**（`theme/toc.ts`）：渲染时抽 h2/h3、生成锚点 id 并写回正文。
-  HTML 里故意出现两份（宽屏 `<aside>` + 窄屏 `<details>`），CSS 按 62rem 二选一 ——
-  `<details>` 的展开由 `open` 属性控制，CSS 盖不住，所以不合并。滚动高亮在 `app.js`。
+  HTML 里故意出现两份（`<aside class="post-toc">` + `<details class="post-toc-inline">`），
+  CSS 按 **76rem** 二选一 —— `<details>` 的展开由 `open` 属性控制，CSS 盖不住，所以不合并。
+  - ≥76rem：`.post-toc` 是 **`position: fixed`**，浮在容器右边留白里
+    （`top: 2.5rem`、`left: calc(50% + 23rem)`、宽 14rem、超高自己滚）。断点是算的：
+    `50% + 23rem + 14rem ≤ 100%` → ≥74rem，留 2rem 余量。
+  - 用 `fixed` 不用 `sticky`，因为 sticky 要求元素在文档流里 → 必须占一列 → 容器必须变宽。
+  - ⚠️ **`offsetParent` 在 `position: fixed` 元素上恒为 `null`。** `app.js` 原本用它判目录显隐，
+    目录改 fixed 后**宽屏下滚动高亮被静默关掉**（不报错、目录照常显示可点，只是永远不亮）。
+    已改用 `tocBox.getClientRects().length > 0`。**改任何「元素可见性」判断前先想起这条。**
 - 索引清单只列 `count > 0` 的分类/标签：274 个标签里只有 198 个有文章，
   剩下 76 个只挂在草稿上（归档页存在，但列进清单就是空页面）。
 
@@ -54,13 +63,20 @@
 
 ```bash
 npm run typecheck && npm run build:assets
-npx wrangler d1 migrations apply blog-db --local
-npx wrangler dev -c wrangler.e2e.jsonc --port 8788   # 另开终端
-curl -s http://127.0.0.1:8788/ | tail -12            # 「=== 结果：全部通过 ===」= 141 项
+npx wrangler d1 migrations apply blog-db --local --persist-to .wrangler/e2e-state
+npx wrangler dev -c wrangler.e2e.jsonc --port 8788 --persist-to .wrangler/e2e-state   # 另开终端
+curl -s http://127.0.0.1:8788/ | grep '=== 结果'      # 「全部通过」= 142 项
 ```
 
+⚠️⚠️ **e2e 会清空本地 D1 和整个 R2**（`e2e-runner.ts` 开头 `DELETE FROM contents/metas/
+relationships/permalink_history` + `BUCKET.list()` 后全删）。本地 D1/R2 与 `preview:r2`
+预览**共用**（所有 wrangler 配置同一个 `database_id`），所以：
+**在导入过真实内容的本地状态上裸跑 e2e = 把真内容和 803 个渲染对象全删掉。**
+跑 e2e 一律加 **`--persist-to .wrangler/e2e-state`**（单独一套 state）。`.wrangler/` 已在
+`.gitignore` 里。只有「想看 fixture 界面」时才在共享 state 上跑，跑完要重新导入 + 重渲。
+
 ⚠️ **汇总行不在末尾**：报告最后还会附 `---FEED---` 和 `---SITEMAP---` 两段 XML，`tail` 只会看到
-`</urlset>`。要判成败就 `grep '=== 结果'`，或者数 `✓` / `✗`（当前基线：141 ✓ / 0 ✗）。
+`</urlset>`。要判成败就 `grep '=== 结果'`，或者数 `✓` / `✗`（当前基线：142 ✓ / 0 ✗）。
 HTTP 状态也是信号：有失败时 worker 返回 500。
 
 生产（**会改线上**）：
@@ -95,7 +111,9 @@ npx wrangler dev -c wrangler.publish.jsonc --remote --port 8799
 # 2) 清 fixture，**保留 users**（管理员 PBKDF2 口令不能丢）
 #    逐条 DELETE，别塞进一个 --command
 # 3) tsx scripts/import-typecho.ts --db .import/TnJehpNtTuc.db --apply local   （约 4 分钟，后台跑）
-# 4) 启 e2e worker，循环 GET /full?offset=N&limit=50 到 nextOffset=null    （803 对象，约 40 秒）
+# 4) 重渲进 R2：**用 preview:r2 的 /__publish，别再起 e2e worker**
+#    curl "http://127.0.0.1:8790/__publish?confirm=local&offset=N&limit=200"
+#    循环到 nextOffset=null（803 个对象 = 5 批：0/200/400/600/800，约 10 秒）
 # 5) 补附件：**并发**跑 wrangler r2 object put，只传缺的（串行版要 25 分钟，见下）
 ```
 
@@ -141,7 +159,7 @@ const browser = await chromium.launch({ executablePath: '/Applications/Google Ch
 npm run preview:r2                                               # 预览本地 R2（8790）
 npx wrangler dev -c wrangler.preview.jsonc --remote --port 8791  # 只读线上桶（换个口，别抢 8790）
 curl "http://127.0.0.1:8790/__keys"                              # 列对象对账
-curl "http://127.0.0.1:8790/__publish?confirm=local&limit=200"   # 重渲本地 R2（跑完 e2e 后要这个）
+curl "http://127.0.0.1:8790/__publish?confirm=local&offset=0&limit=200"   # 重渲本地 R2：循环到 nextOffset=null
 ```
 
 - ⛔ **`--remote` 模式下绝对不要碰 `/__publish`** —— 那时绑定指向线上桶，会写生产。

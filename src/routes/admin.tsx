@@ -125,7 +125,7 @@ adminRoutes.get('/admin', async (c) => {
 	const status = c.req.query('status') ?? '';
 	const categoryMid = Number(c.req.query('category'));
 	const page = Math.max(1, Number.parseInt(c.req.query('page') ?? '1', 10) || 1);
-	const pageSize = 50;
+	const pageSize = 10;
 	const filter = {
 		q: q || undefined,
 		status: status || undefined,

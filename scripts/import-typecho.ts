@@ -26,6 +26,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { countWords, extractText, makeExcerpt, renderMarkdown } from '../src/lib/markdown';
+import { sanitizeHtml } from '../src/lib/sanitize';
 
 // ---------------------------------------------------------------------------
 // 参数
@@ -58,7 +59,48 @@ function sql(value: unknown): string {
 	return `'${String(value).replace(/'/g, "''")}'`;
 }
 
-function tableColumns(db: DatabaseSync, table: string): Set<string> {
+/**
+ * 表名探测：Typecho 的安装前缀可配（`typecho_` 或无前缀），列名也随版本变
+ * （1.2 把 `users.username` 改成了 `users.name`）。所以一律先探测再查，别写死。
+ */
+interface Tables {
+	contents: string;
+	metas: string;
+	relationships: string;
+	users: string;
+	options: string;
+	fields: string | null;
+	comments: string | null;
+}
+
+function resolveTables(db: DatabaseSync): Tables {
+	const names = new Set(
+		(rows<{ name: string }>(db, "SELECT name FROM sqlite_master WHERE type = 'table'").map((row) => row.name)),
+	);
+	const find = (logical: string): string | null => {
+		for (const candidate of [`typecho_${logical}`, logical]) if (names.has(candidate)) return candidate;
+		return null;
+	};
+	const required: [keyof Tables, string][] = [
+		['contents', 'contents'],
+		['metas', 'metas'],
+		['relationships', 'relationships'],
+		['users', 'users'],
+		['options', 'options'],
+	];
+	const resolved: Record<string, string | null> = {};
+	for (const [key, logical] of required) {
+		const found = find(logical);
+		if (!found) throw new Error(`数据库里找不到 ${logical} 表（前缀既不是 typecho_ 也不是无前缀）`);
+		resolved[key] = found;
+	}
+	resolved.fields = find('fields');
+	resolved.comments = find('comments');
+	return resolved as unknown as Tables;
+}
+
+function tableColumns(db: DatabaseSync, table: string | null): Set<string> {
+	if (!table) return new Set();
 	try {
 		const rows = db.prepare(`PRAGMA table_info(${JSON.stringify(table)})`).all() as { name: string }[];
 		return new Set(rows.map((row) => row.name));
@@ -67,7 +109,8 @@ function tableColumns(db: DatabaseSync, table: string): Set<string> {
 	}
 }
 
-function tableExists(db: DatabaseSync, table: string): boolean {
+function tableExists(db: DatabaseSync, table: string | null): boolean {
+	if (!table) return false;
 	const row = db
 		.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`)
 		.get(table) as { name: string } | undefined;
@@ -111,44 +154,44 @@ interface Report {
 	longest: { cid: number; title: string; bytes: number }[];
 }
 
-function analyze(db: DatabaseSync): Report {
+function analyze(db: DatabaseSync, T: Tables): Report {
 	const anomalies: string[] = [];
 	const counts: Record<string, number> = {};
 
-	const contentColumns = tableColumns(db, 'typecho_contents');
-	const hasComments = tableExists(db, 'typecho_comments');
+	const contentColumns = tableColumns(db, T.contents);
+	const hasComments = tableExists(db, T.comments);
 
 	const typeColumn = pick(contentColumns, 'type');
 	const statusColumn = pick(contentColumns, 'status');
 	const typeExpr = typeColumn ? q(typeColumn) : "'post'";
 	const statusExpr = statusColumn ? q(statusColumn) : "'publish'";
 	counts['contents 总数'] = (
-		rows<{ n: number }>(db, 'SELECT COUNT(*) AS n FROM typecho_contents')[0] ?? { n: 0 }
+		rows<{ n: number }>(db, `SELECT COUNT(*) AS n FROM ${T.contents}`)[0] ?? { n: 0 }
 	).n;
 
 	for (const row of rows<{ type: string; status: string; n: number }>(
 		db,
-		`SELECT ${typeExpr} AS type, ${statusExpr} AS status, COUNT(*) AS n FROM typecho_contents GROUP BY 1,2 ORDER BY n DESC`,
+		`SELECT ${typeExpr} AS type, ${statusExpr} AS status, COUNT(*) AS n FROM ${T.contents} GROUP BY 1,2 ORDER BY n DESC`,
 	)) {
 		counts[`  ${row.type} / ${row.status}`] = row.n;
 	}
 
-	const metaColumns = tableColumns(db, 'typecho_metas');
-	counts['metas 总数'] = rows<{ n: number }>(db, 'SELECT COUNT(*) AS n FROM typecho_metas')[0].n;
+	const metaColumns = tableColumns(db, T.metas);
+	counts['metas 总数'] = rows<{ n: number }>(db, `SELECT COUNT(*) AS n FROM ${T.metas}`)[0].n;
 	for (const row of rows<{ type: string; n: number }>(
 		db,
-		`SELECT ${pick(metaColumns, 'type') ? q(pick(metaColumns, 'type')!) : "'category'"} AS type, COUNT(*) AS n FROM typecho_metas GROUP BY 1`,
+		`SELECT ${pick(metaColumns, 'type') ? q(pick(metaColumns, 'type')!) : "'category'"} AS type, COUNT(*) AS n FROM ${T.metas} GROUP BY 1`,
 	)) {
 		counts[`  metas ${row.type}`] = row.n;
 	}
-	counts['relationships'] = rows<{ n: number }>(db, 'SELECT COUNT(*) AS n FROM typecho_relationships')[0].n;
-	counts['users'] = rows<{ n: number }>(db, 'SELECT COUNT(*) AS n FROM typecho_users')[0].n;
-	counts['options'] = rows<{ n: number }>(db, 'SELECT COUNT(*) AS n FROM typecho_options')[0].n;
-	counts['fields'] = tableExists(db, 'typecho_fields')
-		? rows<{ n: number }>(db, 'SELECT COUNT(*) AS n FROM typecho_fields')[0].n
+	counts['relationships'] = rows<{ n: number }>(db, `SELECT COUNT(*) AS n FROM ${T.relationships}`)[0].n;
+	counts['users'] = rows<{ n: number }>(db, `SELECT COUNT(*) AS n FROM ${T.users}`)[0].n;
+	counts['options'] = rows<{ n: number }>(db, `SELECT COUNT(*) AS n FROM ${T.options}`)[0].n;
+	counts['fields'] = tableExists(db, T.fields)
+		? rows<{ n: number }>(db, `SELECT COUNT(*) AS n FROM ${T.fields}`)[0].n
 		: 0;
 	counts['comments（丢弃）'] = hasComments
-		? rows<{ n: number }>(db, 'SELECT COUNT(*) AS n FROM typecho_comments')[0].n
+		? rows<{ n: number }>(db, `SELECT COUNT(*) AS n FROM ${T.comments}`)[0].n
 		: 0;
 
 	const slugColumnName = pick(contentColumns, 'slug');
@@ -159,9 +202,9 @@ function analyze(db: DatabaseSync): Report {
 	// 异常：没有分类的可见文章
 	const orphans = rows<{ cid: number; title: string }>(
 		db,
-		`SELECT c.cid, c.title FROM typecho_contents c
+		`SELECT c.cid, c.title FROM ${T.contents} c
 		  WHERE c.type IN ('post','page')
-		    AND NOT EXISTS (SELECT 1 FROM typecho_relationships r WHERE r.cid = c.cid)
+		    AND NOT EXISTS (SELECT 1 FROM ${T.relationships} r WHERE r.cid = c.cid)
 		    AND c.type = 'post'`,
 	);
 	if (orphans.length > 0) {
@@ -171,14 +214,14 @@ function analyze(db: DatabaseSync): Report {
 	// 异常：slug 重复或为空
 	const emptySlugs = rows<{ cid: number }>(
 		db,
-		`SELECT cid FROM typecho_contents WHERE type IN ('post','page') AND (${slugExpr} IS NULL OR TRIM(${slugExpr}) = '')`,
+		`SELECT cid FROM ${T.contents} WHERE type IN ('post','page') AND (${slugExpr} IS NULL OR TRIM(${slugExpr}) = '')`,
 	);
 	if (emptySlugs.length > 0) {
 		anomalies.push(`有 ${emptySlugs.length} 条 slug 为空（将回落到 cid）：cid=${emptySlugs.slice(0, 10).map((r) => r.cid).join(',')}${emptySlugs.length > 10 ? ' …' : ''}`);
 	}
 	const dupSlugs = rows<{ slug: string; n: number }>(
 		db,
-		`SELECT ${slugExpr} AS slug, COUNT(*) AS n FROM typecho_contents
+		`SELECT ${slugExpr} AS slug, COUNT(*) AS n FROM ${T.contents}
 		  WHERE type IN ('post','page') AND TRIM(COALESCE(${slugExpr},'')) <> ''
 		  GROUP BY 1 HAVING n > 1`,
 	);
@@ -194,15 +237,15 @@ function analyze(db: DatabaseSync): Report {
 	const multi = rows<{ cid: number; title: string; slug: string; by_mid: string; by_rowid: string; cats: string }>(
 		db,
 		`SELECT c.cid, c.title, ${slugExpr} AS slug,
-		        (SELECT GROUP_CONCAT(m.slug) FROM typecho_relationships r JOIN typecho_metas m ON m.mid = r.mid
+		        (SELECT GROUP_CONCAT(m.slug) FROM ${T.relationships} r JOIN ${T.metas} m ON m.mid = r.mid
 		          WHERE r.cid = c.cid AND m.type = 'category' ORDER BY m.mid) AS cats,
-		        (SELECT m.slug FROM typecho_relationships r JOIN typecho_metas m ON m.mid = r.mid
+		        (SELECT m.slug FROM ${T.relationships} r JOIN ${T.metas} m ON m.mid = r.mid
 		          WHERE r.cid = c.cid AND m.type = 'category' ORDER BY m.mid LIMIT 1) AS by_mid,
-		        (SELECT m.slug FROM typecho_relationships r JOIN typecho_metas m ON m.mid = r.mid
+		        (SELECT m.slug FROM ${T.relationships} r JOIN ${T.metas} m ON m.mid = r.mid
 		          WHERE r.cid = c.cid AND m.type = 'category' ORDER BY r.rowid LIMIT 1) AS by_rowid
-		   FROM typecho_contents c
+		   FROM ${T.contents} c
 		  WHERE c.type = 'post'
-		    AND (SELECT COUNT(*) FROM typecho_relationships r JOIN typecho_metas m ON m.mid = r.mid
+		    AND (SELECT COUNT(*) FROM ${T.relationships} r JOIN ${T.metas} m ON m.mid = r.mid
 		          WHERE r.cid = c.cid AND m.type = 'category') > 1`,
 	);
 	counts['多分类文章'] = multi.length;
@@ -210,7 +253,7 @@ function analyze(db: DatabaseSync): Report {
 	// 图片引用盘点
 	const bodies = rows<{ cid: number; text: string; title: string }>(
 		db,
-		`SELECT cid, ${textExpr} AS text, title FROM typecho_contents WHERE type IN ('post','page')`,
+		`SELECT cid, ${textExpr} AS text, title FROM ${T.contents} WHERE type IN ('post','page')`,
 	);
 	const hostCount = new Map<string, number>();
 	const pathCount = new Map<string, number>();
@@ -232,10 +275,10 @@ function analyze(db: DatabaseSync): Report {
 	const urlRows = rows<{ cid: number; slug: string; cat: string | null }>(
 		db,
 		`SELECT c.cid, ${slugExpr} AS slug,
-		        (SELECT m.slug FROM typecho_relationships r JOIN typecho_metas m ON m.mid = r.mid
+		        (SELECT m.slug FROM ${T.relationships} r JOIN ${T.metas} m ON m.mid = r.mid
 		          WHERE r.cid = c.cid AND m.type = 'category' ORDER BY r.mid LIMIT 1) AS cat
-		   FROM typecho_contents c
-		  WHERE c.type = 'post' AND c.status = 'publish'`,
+		   FROM ${T.contents} c
+		  WHERE c.type = 'post' AND c.status IN ('publish','hidden')`,
 	);
 	const urls: string[] = [];
 	for (const row of urlRows) {
@@ -245,22 +288,26 @@ function analyze(db: DatabaseSync): Report {
 	}
 	for (const row of rows<{ slug: string; cid: number }>(
 		db,
-		`SELECT ${slugExpr} AS slug, cid FROM typecho_contents WHERE type = 'page' AND status = 'publish'`,
+		`SELECT ${slugExpr} AS slug, cid FROM ${T.contents} WHERE type = 'page' AND status IN ('publish','hidden')`,
 	)) {
 		urls.push(`/${row.slug?.trim() || row.cid}.html`);
 	}
 	for (const row of rows<{ type: string; slug: string }>(
 		db,
-		`SELECT type, slug FROM typecho_metas WHERE type IN ('category','tag')`,
+		`SELECT type, slug FROM ${T.metas} WHERE type IN ('category','tag')`,
 	)) {
 		urls.push(row.type === 'category' ? `/category/${row.slug}/` : `/tag/${row.slug}/`);
 	}
 	for (const row of rows<{ ym: string }>(
 		db,
-		`SELECT DISTINCT strftime('%Y/%m', created + (SELECT CAST(value AS INTEGER) FROM typecho_options WHERE name = 'timezone' LIMIT 1), 'unixepoch') AS ym
-		   FROM typecho_contents WHERE type = 'post' AND status = 'publish' ORDER BY ym DESC`,
+		`SELECT DISTINCT strftime('%Y/%m', created + (SELECT CAST(value AS INTEGER) FROM ${T.options} WHERE name = 'timezone' LIMIT 1), 'unixepoch') AS ym
+		   FROM ${T.contents} WHERE type = 'post' AND status = 'publish' ORDER BY ym DESC`,
 	)) {
 		if (row.ym) urls.push(`/${row.ym}/`);
+	}
+	// 附件页面：Typecho 1.3 的路由是 /attachment/[cid]/，实测线上 200
+	for (const row of rows<{ cid: number }>(db, `SELECT cid FROM ${T.contents} WHERE type = 'attachment'`)) {
+		urls.push(`/attachment/${row.cid}/`);
 	}
 	urls.push('/feed/', '/sitemap.xml');
 
@@ -280,7 +327,7 @@ function analyze(db: DatabaseSync): Report {
 
 	const longest = rows<{ cid: number; title: string; bytes: number }>(
 		db,
-		`SELECT cid, title, LENGTH(${textExpr}) AS bytes FROM typecho_contents
+		`SELECT cid, title, LENGTH(${textExpr}) AS bytes FROM ${T.contents}
 		  WHERE type IN ('post','page') ORDER BY bytes DESC LIMIT 5`,
 	);
 
@@ -289,8 +336,14 @@ function analyze(db: DatabaseSync): Report {
 		anomalies,
 		options: rows<{ name: string; value: string }>(
 			db,
-			'SELECT name, value FROM typecho_options WHERE user = 0 ORDER BY name',
-		),
+			`SELECT name, value FROM ${T.options} WHERE user = 0 ORDER BY name`,
+		).map((row) => ({
+			name: row.name,
+			// 插件配置与 secret 里可能有凭据，报告里只显示长度（迁移本身也不导入它们）
+			value: /plugin:|secret|key|token|password/i.test(row.name)
+				? `（${(row.value ?? '').length} 字节，含凭据风险，不显示）`
+				: row.value,
+		})),
 		imageHosts: [...hostCount.entries()].map(([host, count]) => ({ host, count })).sort((a, b) => b.count - a.count),
 		imagePaths: [...pathCount.entries()].map(([path, count]) => ({ path, count })).sort((a, b) => b.count - a.count),
 		urls: [...new Set(urls)].sort(),
@@ -326,9 +379,19 @@ interface NewContent {
 }
 
 const MORE_MARKER = /<!--\s*more\s*-->/i;
+/**
+ * Typecho 的正文格式开关：保存时若启用了 Markdown，正文开头会写一个 `<!--markdown-->` 标记，
+ * 渲染时**只有带标记的才走 markdown**，其余原样当 HTML 输出（Typecho_Abstract_Contents::filter）。
+ *
+ * 实测这个库：122 篇带标记、30 篇不带（2010 年前后的老文章是手写 HTML）。
+ * 一律跑 markdown-it 会把老文章的纯文本行包进 `<p>`、还可能吃掉 `*`/`_` —— 所以必须分流。
+ */
+const MARKDOWN_MARKER = /^\s*<!--markdown-->\s*/;
 
-function normalizeType(rawType: string): { type: NewContent['type']; draft: boolean } {
+function normalizeType(rawType: string): { type: NewContent['type']; draft: boolean } | null {
 	const type = String(rawType || 'post').toLowerCase();
+	// `revision` 是修订记录（本库 11 条），不是正文，一律跳过
+	if (type.startsWith('revision')) return null;
 	if (type.startsWith('attachment')) return { type: 'attachment', draft: false };
 	if (type.startsWith('page')) return { type: 'page', draft: type.includes('draft') };
 	return { type: 'post', draft: type.includes('draft') };
@@ -340,20 +403,30 @@ function normalizeStatus(rawStatus: string, draft: boolean): string {
 	return ['publish', 'hidden', 'private', 'waiting'].includes(status) ? status : 'draft';
 }
 
-function buildContentRow(row: Record<string, unknown>, slugColumn: string, textColumn: string): NewContent {
+function buildContentRow(
+	row: Record<string, unknown>,
+	slugColumn: string,
+	textColumn: string,
+): NewContent | null {
 	const cid = Number(row.cid);
-	const { type, draft } = normalizeType(String(row.type ?? 'post'));
+	const normalized = normalizeType(String(row.type ?? 'post'));
+	if (!normalized) return null;
+	const { type, draft } = normalized;
 	const status = normalizeStatus(String(row.status ?? 'publish'), draft);
 	const slug = String(row[slugColumn] ?? '').trim() || String(cid);
 	const body = String(row[textColumn] ?? '');
 
-	// Typecho 的 `<!--more-->` 是摘要分界：前半段当自定义摘要，正文里的标记去掉
-	const moreIndex = body.search(MORE_MARKER);
-	const excerptSource = moreIndex >= 0 ? body.slice(0, moreIndex) : '';
-	const cleanBody = body.replace(MORE_MARKER, '');
-	const rendered = renderMarkdown(cleanBody);
-	const excerpt =
-		excerptSource.trim().length > 0 ? makeExcerpt(renderMarkdown(excerptSource), 220) : makeExcerpt(rendered);
+	// 正文格式：带 `<!--markdown-->` 标记才按 Markdown 渲染，否则是原生 HTML（只清洗）
+	const isMarkdown = MARKDOWN_MARKER.test(body);
+	const source = isMarkdown ? body.replace(MARKDOWN_MARKER, '') : body;
+	const renderSource = (text: string) => (isMarkdown ? renderMarkdown(text) : sanitizeHtml(text));
+
+	// `<!--more-->` 是摘要分界：前半段当自定义摘要，正文里的标记去掉
+	const moreIndex = source.search(MORE_MARKER);
+	const excerptSource = moreIndex >= 0 ? source.slice(0, moreIndex) : '';
+	const cleanBody = source.replace(MORE_MARKER, '');
+	const rendered = renderSource(cleanBody);
+	const excerpt = excerptSource.trim().length > 0 ? makeExcerpt(renderSource(excerptSource), 220) : makeExcerpt(rendered);
 
 	// 附件：Typecho 把元信息塞在 text 里的 JSON
 	let mime: string | null = null;
@@ -406,12 +479,13 @@ const OPTION_MAP: { from: string; to: string }[] = [
 	{ from: 'description', to: 'site_description' },
 	{ from: 'keywords', to: 'site_keywords' },
 	{ from: 'timezone', to: 'timezone' },
+	{ from: 'pageSize', to: 'posts_per_page' }, // Typecho 1.3 的真实选项名
 	{ from: 'postsPerPage', to: 'posts_per_page' },
 	{ from: 'posts_per_page', to: 'posts_per_page' },
 ];
 
-function emitSql(db: DatabaseSync, maps: IdMaps): { files: string[]; summary: Record<string, number> } {
-	const contentColumns = tableColumns(db, 'typecho_contents');
+function emitSql(db: DatabaseSync, maps: IdMaps, T: Tables): { files: string[]; summary: Record<string, number> } {
+	const contentColumns = tableColumns(db, T.contents);
 	const slugColumn = pick(contentColumns, 'slug') ?? 'slug';
 	const textColumn = pick(contentColumns, 'text') ?? 'text';
 	const orderColumn = pick(contentColumns, 'order', 'sort_order') ?? 'order';
@@ -423,12 +497,13 @@ function emitSql(db: DatabaseSync, maps: IdMaps): { files: string[]; summary: Re
 		`SELECT cid, title, ${q(slugColumn)} AS ${slugColumn}, created, modified, ${q(textColumn)} AS ${textColumn},
 		        ${q(orderColumn)} AS "order", ${q(authorColumn)} AS authorId, type, status, password,
 		        ${q(feedColumn)} AS allowFeed, parent
-		   FROM typecho_contents ORDER BY cid`,
+		   FROM ${T.contents} ORDER BY cid`,
 	);
 
 	const map = new Map<number, NewContent>();
 	for (const row of contentRows) {
 		const mapped = buildContentRow(row, slugColumn, textColumn);
+		if (!mapped) continue; // revision 等非正文类型
 		// 作者按 uid 映射（同名用户复用目标库里的 uid，避免 UNIQUE(username) 冲突）
 		mapped.author_id = maps.user.get(mapped.author_id) ?? mapped.author_id;
 		map.set(mapped.cid, mapped);
@@ -448,15 +523,17 @@ function emitSql(db: DatabaseSync, maps: IdMaps): { files: string[]; summary: Re
 	statements.push('-- 顺序：users → metas → contents → relationships → fields → options → 计数刷新');
 
 	// users：**只补作者信息，绝不覆盖口令/token_version**
-	const userColumns = tableColumns(db, 'typecho_users');
+	const userColumns = tableColumns(db, T.users);
+	// Typecho 1.2 把 username 改成了 name
+	const usernameColumn = pick(userColumns, 'username', 'name') ?? 'name';
 	const screenNameColumn = pick(userColumns, 'screenName', 'screen_name') ?? 'screenName';
 	const authColumn = pick(userColumns, 'authCode', 'auth_code') ?? 'authCode';
 	const groupColumn = pick(userColumns, 'group', 'role') ?? 'group';
 	for (const row of rows<Record<string, unknown>>(
 		db,
-		`SELECT uid, username, password, mail, url, ${q(screenNameColumn)} AS screenName, created, activated, logged,
+		`SELECT uid, ${q(usernameColumn)} AS username, password, mail, url, ${q(screenNameColumn)} AS screenName, created, activated, logged,
 		        ${q(groupColumn)} AS "group", ${q(authColumn)} AS authCode
-		   FROM typecho_users ORDER BY uid`,
+		   FROM ${T.users} ORDER BY uid`,
 	)) {
 		const uid = maps.user.get(Number(row.uid));
 		if (uid === undefined) continue;
@@ -474,11 +551,11 @@ function emitSql(db: DatabaseSync, maps: IdMaps): { files: string[]; summary: Re
 	}
 
 	// metas：mid 原样保留（relationships 要引用）
-	const metaColumns = tableColumns(db, 'typecho_metas');
+	const metaColumns = tableColumns(db, T.metas);
 	const metaOrder = pick(metaColumns, 'order', 'sort_order') ?? 'order';
 	for (const row of rows<Record<string, unknown>>(
 		db,
-		`SELECT mid, name, slug, type, description, ${q(metaOrder)} AS "order", parent FROM typecho_metas ORDER BY mid`,
+		`SELECT mid, name, slug, type, description, ${q(metaOrder)} AS "order", parent FROM ${T.metas} ORDER BY mid`,
 	)) {
 		const mid = maps.meta.get(Number(row.mid));
 		if (mid === undefined) continue;
@@ -510,7 +587,7 @@ function emitSql(db: DatabaseSync, maps: IdMaps): { files: string[]; summary: Re
 	// relationships（只保留已导入的 cid）
 	for (const row of rows<{ cid: number; mid: number }>(
 		db,
-		'SELECT cid, mid FROM typecho_relationships ORDER BY cid, mid',
+		`SELECT cid, mid FROM ${T.relationships} ORDER BY cid, mid`,
 	)) {
 		const mid = maps.meta.get(Number(row.mid));
 		if (!keptCids.has(row.cid) || mid === undefined) continue;
@@ -518,10 +595,10 @@ function emitSql(db: DatabaseSync, maps: IdMaps): { files: string[]; summary: Re
 	}
 
 	// fields
-	if (tableExists(db, 'typecho_fields')) {
+	if (tableExists(db, T.fields)) {
 		for (const row of rows<Record<string, unknown>>(
 			db,
-			'SELECT cid, name, type, str_value, int_value, float_value FROM typecho_fields',
+			`SELECT cid, name, type, str_value, int_value, float_value FROM ${T.fields}`,
 		)) {
 			if (!keptCids.has(Number(row.cid))) continue;
 			statements.push(
@@ -533,7 +610,7 @@ function emitSql(db: DatabaseSync, maps: IdMaps): { files: string[]; summary: Re
 
 	// options：白名单，且**跳过 siteUrl**
 	const typechoOptions = new Map(
-		rows<{ name: string; value: string }>(db, 'SELECT name, value FROM typecho_options WHERE user = 0').map(
+		rows<{ name: string; value: string }>(db, `SELECT name, value FROM ${T.options} WHERE user = 0`).map(
 			(row) => [row.name, row.value],
 		),
 	);
@@ -566,8 +643,8 @@ function emitSql(db: DatabaseSync, maps: IdMaps): { files: string[]; summary: Re
 	return {
 		files,
 		summary: {
-			users: rows(db, 'SELECT COUNT(*) AS n FROM typecho_users')[0].n as number,
-			metas: rows(db, 'SELECT COUNT(*) AS n FROM typecho_metas')[0].n as number,
+			users: rows(db, `SELECT COUNT(*) AS n FROM ${T.users}`)[0].n as number,
+			metas: rows(db, `SELECT COUNT(*) AS n FROM ${T.metas}`)[0].n as number,
 			contents: contents.length,
 			posts: contents.filter((row) => row.type === 'post').length,
 			pages: contents.filter((row) => row.type === 'page').length,
@@ -724,7 +801,8 @@ function applySql(files: string[], target: 'local' | 'remote'): void {
 const db = new DatabaseSync(DB_PATH, { readOnly: true });
 console.log(`=== 读 ${DB_PATH}（只读）===\n`);
 
-const report = analyze(db);
+const T = resolveTables(db);
+const report = analyze(db, T);
 
 console.log('=== 行数 ===');
 for (const [key, value] of Object.entries(report.counts)) console.log(`  ${key}: ${value}`);
@@ -792,17 +870,18 @@ if (has('verify-urls')) {
 if (APPLY === 'local' || APPLY === 'remote') {
 	console.log(`\n=== 读目标库现状并建立 id 映射（${APPLY}）===`);
 	const state = fetchTargetState(APPLY);
-	const metaOrderColumn = pick(tableColumns(db, 'typecho_metas'), 'order', 'sort_order') ?? 'order';
+	const metaOrderColumn = pick(tableColumns(db, T.metas), 'order', 'sort_order') ?? 'order';
 	const metaRows = rows<{ mid: number; type: string; slug: string; name: string }>(
 		db,
-		`SELECT mid, name, slug, type FROM typecho_metas ORDER BY mid`,
+		`SELECT mid, name, slug, type FROM ${T.metas} ORDER BY mid`,
 	).map((row) => ({ ...row, mid: Number(row.mid) }));
 	const maps = buildIdMaps(
 		metaRows,
 		rows<{ uid: number; username: string; role: string }>(
 			db,
-			`SELECT uid, username, ${q(pick(tableColumns(db, 'typecho_users'), 'group', 'role') ?? 'group')} AS role
-			   FROM typecho_users`,
+			`SELECT uid, ${q(pick(tableColumns(db, T.users), 'username', 'name') ?? 'name')} AS username,
+			        ${q(pick(tableColumns(db, T.users), 'group', 'role') ?? 'group')} AS role
+			   FROM ${T.users}`,
 		).map((row) => ({
 			uid: Number(row.uid),
 			username: String(row.username),
@@ -821,7 +900,7 @@ if (APPLY === 'local' || APPLY === 'remote') {
 	void metaOrderColumn;
 
 	console.log(`\n=== 生成 SQL 并写入 D1（${APPLY}）===`);
-	const { files, summary } = emitSql(db, maps);
+	const { files, summary } = emitSql(db, maps, T);
 	console.log('  计划：', JSON.stringify(summary));
 	if (has('plan-only')) {
 		console.log(`  --plan-only：只生成不执行，SQL 在 ${SQL_DIR}/`);

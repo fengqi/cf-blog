@@ -1206,6 +1206,36 @@ POST /admin/rebuild/batch { limit: 20 }   # 返回 JSON：{rebuilt, objects, fai
 - 红线：**绝不覆盖现成管理员的 `password` 与 `token_version`** —— 那是刚 bootstrap 好的 PBKDF2 串，
   被 phpass 覆盖就再也登不进去（本地彩排专门设了一个已知哈希来验证这条）。
 
+**真实数据体检结论（2026-09，对着线上库 `TnJehpNtTuc.db`）**
+
+| 项 | 实测 | 处理 |
+|---|---|---|
+| Typecho 版本 / 表名 | **1.3.0，无表前缀**（`contents`/`metas`/…） | 脚本已改为**探测表名**，不再写死 `typecho_` 前缀 |
+| `contents` | 238 行：`post/publish` **111**、`post/hidden` **36**、`post_draft/publish` 13、`page/publish` 1、`page/hidden` 4、`attachment/publish` **62**、`revision/*` **11** | revision 跳过（不是正文）；草稿照旧导成 draft |
+| `users` | 1 行，列名是 **`name`**（1.3 不再叫 `username`） | 脚本已兼容 `name`/`username` |
+| `metas` | 7 分类 + **277 标签**（其中 228 个只有 ≤1 篇文章） | 标签归档 = 277×2 个对象（含 `/1/` 副本），全站构建约 **850~900 个对象** |
+| 附件 | **62 个、11.0 MB**（设计文档原先写「约 10 个、6MB」，**已过时**） | 元信息照搬；文件本体要搬到 R2，路径逐字保持 |
+| 正文格式 | **122 篇带 `<!--markdown-->` 标记、30 篇不带** | 见下（保真关键） |
+| 多分类文章 | 2 篇：cid=394 两种口径一致；cid=632 口径不同 | 线上 `/go/632.html` → **301** → `/default/632.html`，**canonical 与 mid 升序一致** ✓ |
+| URL 逐条核对 | 由 DB 推导 **556 条 URL**，打老站：**551 条 200** | 5 条异常：`/feed/` 500、`/sitemap.xml` 404、`/go/632.html` 301、`/memos.html`+`/pocket.html` 500（这两个 hidden 页面在老站本身就是坏的，新站重渲后会正常） |
+| 注释 / 自定义字段 | 128 条评论（丢弃）；`fields` 0 行 | 评论整体移除 ✓ |
+
+**保真关键：正文格式要按 `<!--markdown-->` 标记分流**
+
+Typecho 只在正文开头带 `<!--markdown-->` 标记时才走 Markdown（`Typecho_Abstract_Contents::filter`），
+其余**原样当 HTML 输出**。本库 122 篇带标记、30 篇不带（2010 年前后是手写 HTML）。
+一律跑 markdown-it 会把老文章的纯文本行包进 `<p>`、还可能吃掉 `*`/`_` —— 脚本已改为分流：
+带标记 → `renderMarkdown`；不带 → 只做白名单清洗。
+
+**两个待定项（需要人拍板，见下）**
+
+1. **`hidden` 的 36 篇文章 + 4 个 hidden 页面**：线上**都返回 200**（只是不进列表）。
+   若降级为草稿就会产生 40 个 404。建议支持为「可访问但不进列表/Feed/sitemap」——
+   schema 里本来就有 `hidden`，要改的只是「页面生成包含 hidden、列表与 Feed 排除」。
+2. **附件页面 `/attachment/<cid>/`（62 个，线上 200）**：Typecho 1.3 的路由表里确有
+   `attachment → /attachment/[cid:digital]/`。要保住这些 URL 就得生成一个最简页面
+   （文件 + 所属文章链接），否则它们会 404。
+
 **已知保真风险：多分类文章的「第一个分类」口径**
 
 Typecho 的 permalink 取「第一个分类」，那个「第一」是 `typecho_relationships` 的**插入顺序**；

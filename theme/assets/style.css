@@ -400,12 +400,18 @@ hr {
 	display: grid;
 	gap: 3rem;
 	align-items: start;
+	/* 单列（无目录）时这一列就是正文宽度，整块居中 */
+	grid-template-columns: minmax(0, min(42rem, 100%));
+	justify-content: center;
 }
 
+/*
+ * 正文列宽**由网格轨道决定，不在 `.post-body` 上写 `margin-inline: auto`**。
+ * 实测踩过：grid item 带 `auto` 外边距会退化成「内容宽度」，
+ * 42rem 的正文被挤成 340px（内容只有几行中文那么宽），而 `max-width` 还是 672px ——
+ * 从 computed style 完全看不出问题，只有量 `getBoundingClientRect` 才暴露。
+ */
 .post-body {
-	/* 中文正文的舒适行宽。有目录时≈网格第一栏，没目录时它自己把正文收住 */
-	max-width: 42rem;
-	margin-inline: auto;
 	min-width: 0;
 }
 
@@ -768,7 +774,7 @@ hr {
 /* 宽屏：目录固定在右栏，正文里的折叠目录收起来 */
 @media (min-width: 62.01rem) {
 	.post-layout--with-toc {
-		grid-template-columns: minmax(0, 1fr) 14rem;
+		grid-template-columns: minmax(0, min(42rem, 100%)) 14rem;
 	}
 
 	.post-toc {

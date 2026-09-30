@@ -150,13 +150,19 @@ ${contentHtml}
 		</div>
 	</article>${navHtml.length ? `\n\t<nav class="post-nav">\n\t\t${navHtml.join('\n\t\t')}\n\t</nav>` : ''}`;
 
+	/**
+	 * `.post-body` **两种版式都要有**：正文列宽由它的网格轨道决定
+	 * （见 style.css 的 `.post-layout`）。无目录时少了这层包裹，正文会直接铺满 62rem。
+	 */
+	const body = `		<div class="post-body">
+${article}
+		</div>`;
+
 	// 没有 h2/h3 的文章（短文、纯代码笔记）不渲染空目录栏，正文自己居中即可
 	const content =
 		toc.length > 0
 			? `	<div class="post-layout post-layout--with-toc">
-		<div class="post-body">
-${article}
-		</div>
+${body}
 		<aside class="post-toc" aria-label="文章目录">
 			<h2 class="post-toc-title">目录</h2>
 			<ol class="toc-list">
@@ -165,7 +171,7 @@ ${tocItems}
 		</aside>
 	</div>`
 			: `	<div class="post-layout">
-${article}
+${body}
 	</div>`;
 
 	return renderLayout({

@@ -8,7 +8,7 @@
 
 ## 为什么这么搭
 
-前台每一个页面（文章、首页、分页、分类、标签、归档、Feed、Sitemap）都在**发布时**渲染成完整 HTML 写入 R2，由 R2 直接对外服务。
+前台每一个页面（文章、首页、分页、分类、标签、归档、索引页、Feed、Sitemap）都在**发布时**渲染成完整 HTML 写入 R2，由 R2 直接对外服务。
 
 **前台零 Worker 请求** —— 这是绕开 Workers 免费版 10 万请求/天 的唯一手段。注意边缘缓存省不了请求额度（命中缓存也照算），只有"不进 Worker"才行。
 
@@ -28,6 +28,9 @@
 theme/            前台主题（字符串模板，发布时渲染后写入 R2）
   assets/         CSS / JS 源文件 —— 由 build:assets 打指纹后写入 R2 的 theme/
   assets.ts       资源访问器（路径、<link>、<script> 标签）
+  layout.ts       页面骨架：顶栏导航 + 按页型限宽（narrow 44rem / post 62rem）
+  toc.ts          文章目录：抽 h2/h3、生成锚点 id、写回正文
+  overview.ts     索引页 /categories/、/tags/、/archives/
 src/
   routes/         后台路由
   views/          后台页面组件（Hono JSX，.tsx）
@@ -85,7 +88,7 @@ npx wrangler dev -c wrangler.e2e.jsonc --port 8788    # 另开一个终端
 curl -s http://127.0.0.1:8788/ | tail -3              # 看到「全部通过」即 OK
 ```
 
-断言集在 `scripts/e2e-runner.ts`（121 项）。`wrangler.e2e.jsonc` 只给本地用，**不要拿它部署**。
+断言集在 `scripts/e2e-runner.ts`（139 项）。`wrangler.e2e.jsonc` 只给本地用，**不要拿它部署**。
 （`wrangler dev` 需要写 `~/.wrangler/registry`，在受限沙箱里跑不起来。）
 
 ## 后台
@@ -174,3 +177,19 @@ wrangler secret put TURNSTILE_SECRET
 - **`src/views/`（`.tsx`）**：后台页面，Hono JSX，直接当 HTTP 响应返回
 
 不要互相串用。后台 JSX 另有两条规定：只 import `hono/jsx`（不用 `hono/jsx/dom`）；唯一的转义出口 `dangerouslySetInnerHTML` 只允许用在文章正文。
+
+## 导航与版式（速查）
+
+**全站零侧栏。** 站内导航只有顶栏一处：`首页 / 分类 / 标签 / 归档 / 关于`，**不做下拉展开**，
+点进去是 `/categories/`、`/tags/`、`/archives/` 三个索引页（索引页是新增 URL，老站没有）。
+
+这么改不只是审美：侧栏里的「最新文章」「分类/标签/月份的文章数」是全局可变数据，
+挂在文章页上意味着「发一篇文章理论上要让 765 个页面失效」。去掉之后，
+可变数据只活在 3 个索引页对象里，文章页只依赖自己和主题（design.md §5.1 / §11.1）。
+
+- 容器宽度：列表类页面 44rem、文章页 62rem —— 去掉侧栏后按 1080px 排，中文一行能塞六十多个字
+- 文章目录在**服务端**抽取（`theme/toc.ts`），宽屏右栏 sticky、窄屏正文顶部 `<details>`，
+  两份静态 HTML 由 CSS 按 62rem 二选一，**零 JS**；滚动高亮是 `app.js` 的纯增量增强
+- 「关于」链到独立页面 `about`（`render.ts` 的 `ABOUT_SLUG`）；站点里没有这个 slug 时整条不渲染
+- 一次发布重建约 30~40 个对象；**删除一篇文章同样只重建受影响的 ~35 个**（`postDeleteTargets`），
+  不是全站 800 个 —— 这条曾经是纯浪费

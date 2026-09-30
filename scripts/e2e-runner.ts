@@ -923,6 +923,13 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	const moreObj = await env.BUCKET.get('default/more-marker.html');
 	const moreHtml = await moreObj?.text() ?? '';
 	check('文章页用 more 标记前的摘要', moreHtml.includes('这是标记前的摘要部分。'));
+	const homeObj = await env.BUCKET.get('');
+	const homeExcerptHtml = await homeObj?.text() ?? '';
+	check(
+		'首页摘要按 Markdown 渲染成 HTML',
+		homeExcerptHtml.includes('<div class="post-excerpt"><p>这是标记前的摘要部分。</p>'),
+		`hasDiv=${homeExcerptHtml.includes('post-excerpt')} hasText=${homeExcerptHtml.includes('这是标记前的摘要部分。')}`,
+	);
 
 	// 改口令（⑤）：错误当前口令 / 两次不一致 / 成功后旧会话全失效
 	const wrongCurrent = await postForm(
@@ -972,13 +979,18 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	const page1 = await call('/admin', { headers: { cookie: pageCookie } });
 	const page1Html = await page1.text();
 	check('第 1 页出现下一页链接', page1.status === 200 && page1Html.includes('/admin?page=2'));
-	check('第 1 页不含第 2 页的文章', !page1Html.includes('分页填充文章 51'));
+	check('第 1 页不含最后的填充文章', !page1Html.includes('分页填充文章 55'));
 	const page2 = await call('/admin?page=2', { headers: { cookie: pageCookie } });
 	const page2Html = await page2.text();
-	check('第 2 页只有填充文章', page2.status === 200 && page2Html.includes('分页填充文章 51') && !page2Html.includes('第 2 篇'));
+	// 填充文章按 created 插在正主文章和「更老的填充」之间，第 2 页是否纯填充取决于每页条数
+	// （目前后台 10 条/页：填充文章占第 6~60 行，第 2 页 = 第 11~20 行，全是填充）
+	check(
+		'第 2 页是填充文章、没有正主文章',
+		page2.status === 200 && page2Html.includes('分页填充文章') && !page2Html.includes('第 2 篇'),
+	);
 	const page2Filtered = await call(`/admin?q=${encodeURIComponent('分页')}&page=2`, { headers: { cookie: pageCookie } });
 	const page2FilteredHtml = await page2Filtered.text();
-	check('翻页链接背着筛选参数', page2Filtered.status === 200 && page2FilteredHtml.includes('分页填充文章 51'));
+	check('翻页链接背着筛选参数', page2Filtered.status === 200 && page2FilteredHtml.includes('分页填充文章'));
 
 	// -----------------------------------------------------------------------
 	// 产物（交给外部 XML 校验）

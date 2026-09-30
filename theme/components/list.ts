@@ -39,6 +39,7 @@ export function renderPostItem(post: ListPost, site: SiteInfo): string {
 			<p class="post-meta">
 				${meta.join('\n\t\t\t\t')}
 			</p>${post.excerptHtml ? `\n\t\t\t<div class="post-excerpt">${post.excerptHtml}</div>` : ''}
+			<p class="post-more"><a href="${escapeHtml(post.url)}" title="${escapeHtml(post.title)}">阅读剩余部分</a></p>
 		</li>`;
 }
 

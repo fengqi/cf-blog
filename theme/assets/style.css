@@ -372,6 +372,21 @@ hr {
 	margin-bottom: 0;
 }
 
+/* 「阅读剩余部分」：参考 Typecho 旧主题的 .more —— 纯文字、居中，不抢摘要的视觉权重 */
+.post-more {
+	margin: 0.9rem 0 0;
+	text-align: center;
+}
+
+.post-more a {
+	color: var(--text-soft);
+	font-size: 0.9375rem;
+}
+
+.post-more a:hover {
+	color: var(--accent-hover);
+}
+
 .post-empty {
 	color: var(--text-muted);
 	text-align: center;

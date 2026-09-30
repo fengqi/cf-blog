@@ -61,6 +61,19 @@ export function themeAssetTargets(): Target[] {
 	return THEME_ASSETS.map((asset) => ({ key: asset.key, kind: 'asset' as const, name: asset.name }));
 }
 
+/**
+ * 给任意目标清单补上主题资源 —— **所有会写 HTML 的发布路径都必须经过这里**。
+ *
+ * 页面里注入的 `<link>`/`<script>` 指纹来自**当前部署的代码**：改了 theme/assets
+ * 重新部署后，任何「只渲一部分对象」的路径（发一篇文章、Cron 对账、按分组渲染）
+ * 写出的都是引用新指纹的 HTML —— 资源对象若还没进 R2，前台就是无样式页面
+ * （2026-09-30 生产事故 ×2）。资源是幂等写（同 key 同内容，immutable 缓存不受影响），
+ * 代价是每次发布多 2~3 个 PUT，换来「写出的 HTML 引用的指纹必然已存在」这条不变量。
+ */
+function withThemeAssets(targets: Target[]): Target[] {
+	return [...themeAssetTargets(), ...targets];
+}
+
 /** 首页 + 全部分页（page/1/ 是首页的副本，也要生成，§5.1） */
 function indexTargets(snapshot: SiteSnapshot): Target[] {
 	const totalPages = pageCount(snapshot.posts.length, snapshot.postsPerPage);
@@ -198,7 +211,7 @@ export function postPublishTargets(snapshot: SiteSnapshot, post: PostRecord): Ta
 	wanted.add(FEED_KEY);
 	wanted.add(SITEMAP_KEY);
 
-	return siteTargets(snapshot).filter((target) => wanted.has(target.key));
+	return withThemeAssets(siteTargets(snapshot).filter((target) => wanted.has(target.key)));
 }
 
 /**
@@ -211,7 +224,7 @@ export function postPublishTargets(snapshot: SiteSnapshot, post: PostRecord): Ta
  */
 export function pagePublishTargets(snapshot: SiteSnapshot, page: PostRecord): Target[] {
 	const wanted = new Set<string>([standaloneKeyOf(page), SITEMAP_KEY]);
-	return siteTargets(snapshot).filter((target) => wanted.has(target.key));
+	return withThemeAssets(siteTargets(snapshot).filter((target) => wanted.has(target.key)));
 }
 
 /**
@@ -259,7 +272,7 @@ export function postDeleteTargets(snapshot: SiteSnapshot, record: PostRecord): T
 	wanted.add(FEED_KEY);
 	wanted.add(SITEMAP_KEY);
 
-	return siteTargets(snapshot).filter((target) => wanted.has(target.key));
+	return withThemeAssets(siteTargets(snapshot).filter((target) => wanted.has(target.key)));
 }
 
 /**
@@ -277,7 +290,7 @@ export function contentPublishTargets(snapshot: SiteSnapshot, record: PostRecord
 		const retired: Target[] = snapshot.retired
 			.filter((entry) => entry.cid === record.cid)
 			.map((entry) => ({ key: entry.key, kind: 'post', post: record, canonicalPath: entry.canonicalPath }));
-		return [own, ...retired];
+		return withThemeAssets([own, ...retired]);
 	}
 	return record.type === 'page'
 		? pagePublishTargets(snapshot, record)

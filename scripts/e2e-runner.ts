@@ -203,8 +203,10 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 		THEME_ASSETS.every((asset) => themeTargets.some((target) => target.kind === 'asset' && target.name === asset.name)),
 	);
 	check(
-		'单篇发布的清单不含主题资源（不为发一篇文章重写 immutable 对象）',
-		postPublishTargets(loaded.snapshot, loaded.snapshot.posts[0]).every((target) => target.kind !== 'asset'),
+		'单篇发布的清单带上主题资源（写出的 HTML 引用的指纹必须已在 R2）',
+		postPublishTargets(loaded.snapshot, loaded.snapshot.posts[0])
+			.slice(0, THEME_ASSETS.length)
+			.every((target) => target.kind === 'asset'),
 	);
 
 	// -----------------------------------------------------------------------

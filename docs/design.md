@@ -669,8 +669,13 @@ markdown-it 的版本升级可能改变输出，所有文章共用一套渲染�
 
 三条要记住的：
 
-1. **资源不进「单篇发布」的清单。** 发一篇文章没必要重写几个 `immutable` 对象 ——
-   只有 `siteTargets()`（全站重渲 / 分批重渲）里才有它们。e2e 有断言盯着这条。
+1. **资源跟着每一条发布清单走。** ~~发一篇文章没必要重写几个 `immutable` 对象~~ ——
+   这条在 2026-09-30 被两次生产事故推翻：改了 `theme/assets` 重新部署后，任何「只渲部分对象」
+   的路径（发文章、Cron 对账、按分组渲染）写出的都是引用**新指纹**的 HTML，而资源对象
+   还没进 R2，前台直接裸奔。所以所有会写 HTML 的发布清单（`postPublishTargets` /
+   `pagePublishTargets` / `postDeleteTargets` / `contentPublishTargets`）都经过
+   `withThemeAssets()` 补上资源目标。资源是幂等写（同 key 同内容，immutable 不受影响），
+   代价是每次发布多 2~3 个 PUT。e2e 有断言盯着这条。
 2. **旧指纹对象不删。** 全站重渲后页面指向新 hash，但边缘与浏览器可能还握着旧 HTML
    （文章页是短缓存），它们会来请求旧文件名。与 §14.2 的告警是同一条纪律。
 3. **`assets.generated.ts` 要提交。** e2e / bench / 迁移脚本都直接读它，仓库里必须有一份可用的；

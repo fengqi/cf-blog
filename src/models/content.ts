@@ -548,3 +548,49 @@ export async function countNeedsSync(db: Db): Promise<number> {
 	);
 	return row?.count ?? 0;
 }
+
+// -------------------------------------------------------------------------
+// 附件（媒体库）—— design.md §9：路径保持 /usr/uploads/<年>/<月>/<文件名>，
+// 元信息照 Typecho 惯例存 contents（type='attachment'，mime/size/r2_key 专用列）
+// -------------------------------------------------------------------------
+
+export interface AttachmentRow {
+	cid: number;
+	title: string;
+	created: number;
+	mime: string | null;
+	size: number;
+	r2_key: string;
+}
+
+/** 后台媒体库列表（新→旧）；不回捞 body/rendered —— 附件没有这些 */
+export async function listAttachments(db: Db, limit = 200): Promise<AttachmentRow[]> {
+	return await db.all<AttachmentRow>(
+		`SELECT cid, title, created, mime, size, r2_key
+		   FROM contents
+		  WHERE type = 'attachment' AND r2_key IS NOT NULL
+		  ORDER BY created DESC, cid DESC
+		  LIMIT ?`,
+		[limit],
+	);
+}
+
+export interface AttachmentInput {
+	title: string;
+	mime: string;
+	size: number;
+	r2Key: string;
+	authorId: number;
+}
+
+/** 附件落库：needs_sync = 0 —— 附件不进内容渲染流水线，文件本体在上传时直接写 R2 */
+export async function createAttachment(db: Db, input: AttachmentInput): Promise<number> {
+	const now = Math.floor(Date.now() / 1000);
+	const result = await db.run(
+		`INSERT INTO contents (title, slug, created, modified, body, rendered, excerpt, sort_order,
+		                       author_id, type, status, allow_feed, parent, words, mime, size, r2_key, needs_sync)
+		 VALUES (?, ?, ?, ?, '', '', NULL, 0, ?, 'attachment', 'publish', 0, 0, 0, ?, ?, ?, 0)`,
+		[input.title, String(now), now, now, input.authorId, input.mime, input.size, input.r2Key],
+	);
+	return Number(result.meta.last_row_id);
+}

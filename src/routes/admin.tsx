@@ -8,14 +8,17 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { createDb } from '../lib/db';
+import { hashPassword, PBKDF2_ITERATIONS, verifyPassword } from '../lib/auth';
 import { parseDateTimeLocal } from '../lib/time';
 import {
 	countNeedsSync,
+	createAttachment,
 	createContent,
 	getContentByCid,
 	getEditorView,
 	type ContentInput,
 	listAdminPosts,
+	listAttachments,
 	markAllDirty,
 	recordPermalink,
 	setContentTerms,
@@ -23,9 +26,19 @@ import {
 } from '../models/content';
 import { ensureTags, listTerms } from '../models/meta';
 import { getOptionValue, getSiteOptions, saveSiteSettings } from '../models/option';
+import { getUserById, updatePassword } from '../models/user';
+import {
+	attachmentContentType,
+	attachmentKey,
+	MAX_ATTACHMENT_BYTES,
+	putAttachment,
+	sanitizeAttachmentFilename,
+} from '../publish/attachments';
 import { deletePost, publishPost, rebuildTargetsSlice } from '../publish/pipeline';
 import { reconcileNeedsSync } from '../publish/sync';
 import { hasUrl, postKeyOf } from '../publish/targets';
+import { ChangePasswordPage } from '../views/password';
+import { MediaLibraryPage } from '../views/media';
 import { PostEditorPage } from '../views/post-editor';
 import { PostListPage } from '../views/post-list';
 import { SettingsPage } from '../views/settings';
@@ -188,6 +201,120 @@ adminRoutes.post('/admin/settings', async (c) => {
 		message = `设置已保存；前台配置有变动，已把 ${marked} 篇内容排入重建（Cron 每小时 20 篇，或用分批重建立即刷完）`;
 	}
 	return c.redirect('/admin/settings?message=' + encodeURIComponent(message), 303);
+});
+
+adminRoutes.get('/admin/media', async (c) => {
+	const db = createDb(c.env.DB, 'admin');
+	const [options, attachments] = await Promise.all([
+		getSiteOptions(c.env),
+		listAttachments(db),
+	]);
+	return c.html(
+		<MediaLibraryPage
+			attachments={attachments}
+			siteUrl={options.siteUrl}
+			timezoneOffset={options.timezoneOffset}
+			user={c.var.user}
+			message={c.req.query('message')}
+			error={c.req.query('error')}
+		/>,
+	);
+});
+
+/**
+ * 附件上传（§9）：校验类型/大小 → 写 R2（immutable，不可覆盖）→ 元信息落 D1。
+ * 附件不进渲染流水线（needs_sync=0），所以这里没有 waitUntil / 发布动作。
+ */
+adminRoutes.post('/admin/media', async (c) => {
+	const db = createDb(c.env.DB, 'admin');
+	const options = await getSiteOptions(c.env);
+	const form = await c.req.formData();
+	const files = form.getAll('files').filter((entry): entry is File => entry instanceof File && entry.size > 0);
+
+	if (files.length === 0) {
+		return c.redirect('/admin/media?error=' + encodeURIComponent('没有选择文件'), 303);
+	}
+
+	const now = Math.floor(Date.now() / 1000);
+	const uploaded: string[] = [];
+	const failed: string[] = [];
+	for (const file of files) {
+		const name = sanitizeAttachmentFilename(file.name);
+		if (!name) {
+			failed.push(`${file.name}：文件名不合法（含 %?# 等字符或为空）`);
+			continue;
+		}
+		const contentType = attachmentContentType(name);
+		if (!contentType) {
+			failed.push(`${name}：类型不在白名单（jpg/png/webp/gif/avif/pdf）`);
+			continue;
+		}
+		if (file.size > MAX_ATTACHMENT_BYTES) {
+			failed.push(`${name}：超过 10MB`);
+			continue;
+		}
+		const key = attachmentKey(now, options.timezoneOffset, name);
+		const result = await putAttachment(c.env, key, await file.arrayBuffer(), contentType);
+		if (!result.ok) {
+			failed.push(`${name}：${result.reason}`);
+			continue;
+		}
+		await createAttachment(db, {
+			title: name,
+			mime: contentType,
+			size: file.size,
+			r2Key: key,
+			authorId: c.var.user.uid,
+		});
+		uploaded.push(name);
+	}
+
+	if (uploaded.length === 0) {
+		return c.redirect('/admin/media?error=' + encodeURIComponent(`全部失败：${failed.join('；')}`), 303);
+	}
+	const message =
+		failed.length > 0 ? `上传 ${uploaded.length} 个；失败 ${failed.length} 个：${failed.join('；')}` : `已上传 ${uploaded.join('、')}`;
+	return c.redirect('/admin/media?message=' + encodeURIComponent(message), 303);
+});
+
+adminRoutes.get('/admin/password', async (c) => {
+	return c.html(
+		<ChangePasswordPage
+			user={c.var.user}
+			message={c.req.query('message')}
+			error={c.req.query('error')}
+		/>,
+	);
+});
+
+/**
+ * 改口令（§8.2）：校验当前口令 → PBKDF2 哈希落库 → `token_version += 1`。
+ * 保存成功后当前会话也失效了（中间件比 tv），跳登录页让用户用新口令进来。
+ */
+adminRoutes.post('/admin/password', async (c) => {
+	const db = createDb(c.env.DB, 'admin');
+	const form = await c.req.formData();
+	const current = String(form.get('current_password') ?? '');
+	const next = String(form.get('new_password') ?? '');
+	const confirm = String(form.get('confirm_password') ?? '');
+
+	if (next.length < 8) {
+		return c.redirect('/admin/password?error=' + encodeURIComponent('新口令至少 8 位'), 303);
+	}
+	if (next !== confirm) {
+		return c.redirect('/admin/password?error=' + encodeURIComponent('两次输入的新口令不一致'), 303);
+	}
+
+	const user = await getUserById(db, c.var.user.uid);
+	if (!user || !(await verifyPassword(current, user.password))) {
+		return c.redirect('/admin/password?error=' + encodeURIComponent('当前口令不正确'), 303);
+	}
+
+	await updatePassword(db, user.uid, await hashPassword(next, PBKDF2_ITERATIONS));
+	return c.redirect(
+		'/admin/login?message=' + encodeURIComponent('口令已修改，请用新口令重新登录'),
+		303,
+	);
 });
 
 adminRoutes.get('/admin/posts/new', async (c) => {

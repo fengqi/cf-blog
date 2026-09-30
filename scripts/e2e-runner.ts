@@ -588,6 +588,7 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	const listPage = await call('/admin', { headers: { cookie: sessionCookie } });
 	const listHtml = await listPage.text();
 	check('登录后能进文章列表', listPage.status === 200 && listHtml.includes('第 2 篇'));
+	check('重渲按钮带分批循环脚本（待办 ⑥）', listHtml.includes('id="rebuild-form"') && listHtml.includes('/admin/rebuild/full'));
 
 	// 后台设置页：SSR 表单保存 options（§6.1 / §7.3）
 	lines.push('=== 后台设置页 ===');
@@ -705,6 +706,90 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	// 登出
 	const logout = await postForm('/admin/logout', {}, sessionCookie);
 	check('登出清 Cookie', logout.status === 303 && /blog_session=;/.test(logout.headers.get('set-cookie') ?? ''));
+
+	// -----------------------------------------------------------------------
+	// 8.5 媒体库 / 改口令 / 分批重建端点（待办 ④⑤⑥）
+	// -----------------------------------------------------------------------
+	lines.push('=== 媒体库与改口令 ===');
+	const relogin = await postForm('/admin/login', { username: 'admin', password: 'e2e-口令-123' });
+	const cookie2 = (relogin.headers.get('set-cookie') ?? '').split(';')[0];
+	check('重新登录成功（后续测试用）', relogin.status === 303 && cookie2.startsWith('blog_session='));
+
+	// 分批重建端点（全站重渲按钮循环调的就是它）
+	const fullSlice = await postForm('/admin/rebuild/full', { offset: '0', limit: '50' }, cookie2);
+	const fullReport = (await fullSlice.json()) as { total: number; written: number; failed: string[]; nextOffset: number | null };
+	check(
+		'分批重建端点返回进度（待办 ⑥）',
+		fullSlice.status === 200 &&
+			typeof fullReport.total === 'number' &&
+			fullReport.total > 0 &&
+			fullReport.written > 0 &&
+			(fullReport.nextOffset === null || typeof fullReport.nextOffset === 'number'),
+		`total=${fullReport.total} written=${fullReport.written} nextOffset=${fullReport.nextOffset}`,
+	);
+
+	// 媒体库：页面 + multipart 上传（白名单外的 .txt 应被拒）
+	const mediaPage = await call('/admin/media', { headers: { cookie: cookie2 } });
+	const mediaHtml = await mediaPage.text();
+	check('媒体库能打开', mediaPage.status === 200 && mediaHtml.includes('name="files"'));
+
+	const uploadForm = new FormData();
+	uploadForm.append('files', new File([new Uint8Array([137, 80, 78, 71])], 'e2e 图片.png', { type: 'image/png' }));
+	uploadForm.append('files', new File(['plain text'], 'bad.txt', { type: 'text/plain' }));
+	const uploadRes = await call('/admin/media', { method: 'POST', body: uploadForm, headers: { cookie: cookie2 } });
+	const uploadLoc = decodeURIComponent(uploadRes.headers.get('location') ?? '');
+	check('上传返回 303', uploadRes.status === 303);
+	check('白名单外的 .txt 被拒、png 成功', uploadLoc.includes('上传 1 个') && uploadLoc.includes('失败 1 个') && uploadLoc.includes('bad.txt'), uploadLoc);
+
+	const attRow = await all<{ cid: number; r2_key: string; mime: string; size: number }>(
+		"SELECT cid, r2_key, mime, size FROM contents WHERE type = 'attachment' ORDER BY cid DESC LIMIT 1",
+	);
+	check('附件元信息落库（mime/size/r2_key）', attRow[0]?.mime === 'image/png' && attRow[0]?.size === 4, JSON.stringify(attRow[0]));
+	check('附件 key 按 §9 路径规则', /^usr\/uploads\/\d{4}\/\d{2}\/e2e 图片\.png$/.test(attRow[0]?.r2_key ?? ''), attRow[0]?.r2_key);
+	const attObj = await env.BUCKET.get(attRow[0]?.r2_key ?? '');
+	check(
+		'附件写进 R2 且 immutable',
+		attObj !== null &&
+			attObj.httpMetadata?.cacheControl === 'public, max-age=31536000, immutable' &&
+			attObj.httpMetadata?.contentType === 'image/png',
+		JSON.stringify(attObj?.httpMetadata),
+	);
+
+	const dupForm = new FormData();
+	dupForm.append('files', new File([new Uint8Array([1])], 'e2e 图片.png', { type: 'image/png' }));
+	const dupRes = await call('/admin/media', { method: 'POST', body: dupForm, headers: { cookie: cookie2 } });
+	check('同名附件不可覆盖（immutable）', dupRes.status === 303 && decodeURIComponent(dupRes.headers.get('location') ?? '').includes('不可覆盖'));
+
+	const mediaAfter = await (await call('/admin/media', { headers: { cookie: cookie2 } })).text();
+	check('媒体库列表显示新附件', mediaAfter.includes('e2e 图片.png') && mediaAfter.includes('data-copy'));
+
+	// 改口令（⑤）：错误当前口令 / 两次不一致 / 成功后旧会话全失效
+	const wrongCurrent = await postForm(
+		'/admin/password',
+		{ current_password: 'wrong', new_password: '新的口令-456', confirm_password: '新的口令-456' },
+		cookie2,
+	);
+	check('当前口令错被拒', wrongCurrent.status === 303 && decodeURIComponent(wrongCurrent.headers.get('location') ?? '').includes('当前口令不正确'));
+
+	const mismatched = await postForm(
+		'/admin/password',
+		{ current_password: 'e2e-口令-123', new_password: '新的口令-456', confirm_password: '另一个-456' },
+		cookie2,
+	);
+	check('两次新口令不一致被拒', mismatched.status === 303 && decodeURIComponent(mismatched.headers.get('location') ?? '').includes('不一致'));
+
+	const changePw = await postForm(
+		'/admin/password',
+		{ current_password: 'e2e-口令-123', new_password: '新的口令-456', confirm_password: '新的口令-456' },
+		cookie2,
+	);
+	check('改口令成功跳登录页', changePw.status === 303 && (changePw.headers.get('location') ?? '').includes('/admin/login'));
+	const staleSession = await call('/admin', { headers: { cookie: cookie2 } });
+	check('旧会话已失效（token_version +1）', staleSession.status === 302);
+	const pwRelogin = await postForm('/admin/login', { username: 'admin', password: '新的口令-456' });
+	check('新口令能登录', pwRelogin.status === 303);
+	const pwOldLogin = await postForm('/admin/login', { username: 'admin', password: 'e2e-口令-123' });
+	check('旧口令被拒', pwOldLogin.status === 401);
 
 	// -----------------------------------------------------------------------
 	// 产物（交给外部 XML 校验）

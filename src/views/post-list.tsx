@@ -35,18 +35,13 @@ export function PostListPage(props: PostListPageProps) {
 				<a class="button" href="/admin/posts/new">
 					写文章
 				</a>
-				<form method="post" action="/admin/rebuild">
+				<form method="post" action="/admin/rebuild" id="rebuild-form">
 					<button type="submit">全站重新渲染</button>
 				</form>
-				<span class="hint">
-					共 {props.posts.length} 条
-					{props.needsSync > 0 ? (
-						<>
-							{' · '}
-							<span class="badge dirty">待同步 {props.needsSync}</span>
-						</>
-					) : null}
+				<span id="rebuild-progress" class="hint" role="status">
+					{props.needsSync > 0 ? <span class="badge dirty">待同步 {props.needsSync}</span> : null}
 				</span>
+				<span class="hint">共 {props.posts.length} 条</span>
 			</div>
 
 			<table>
@@ -91,6 +86,49 @@ export function PostListPage(props: PostListPageProps) {
 				</tbody>
 			</table>
 			{props.posts.length === 0 ? <p class="hint">还没有内容。</p> : null}
+
+			<script>{`
+document.addEventListener('DOMContentLoaded', function () {
+  var form = document.getElementById('rebuild-form');
+  if (!form) return;
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    var button = form.querySelector('button');
+    var progress = document.getElementById('rebuild-progress');
+    button.disabled = true;
+    var offset = 0;
+    var written = 0;
+    var failed = [];
+    function step() {
+      fetch('/admin/rebuild/full', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ offset: String(offset), limit: '50' }),
+        credentials: 'same-origin',
+      })
+        .then(function (response) { return response.json(); })
+        .then(function (report) {
+          written += report.written;
+          failed = failed.concat(report.failed || []);
+          progress.textContent = '重建中… ' + (report.offset + report.written) + ' / ' + report.total;
+          if (report.nextOffset === null) {
+            progress.textContent = '重建完成：' + written + ' 个对象' +
+              (failed.length > 0 ? '，失败 ' + failed.length + ' 个（可重试）' : '');
+            button.disabled = false;
+          } else {
+            offset = report.nextOffset;
+            step();
+          }
+        })
+        .catch(function (error) {
+          progress.textContent = '重建失败：' + error + '（已处理 ' + written + ' 个，可重试）';
+          button.disabled = false;
+        });
+    }
+    step();
+  });
+});
+`}</script>
 		</AdminLayout>
 	);
 }

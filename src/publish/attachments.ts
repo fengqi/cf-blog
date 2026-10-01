@@ -78,3 +78,13 @@ export async function putAttachment(
 	});
 	return { ok: true };
 }
+
+/**
+ * 删除附件对象（编辑器右侧「附件」tab 的快捷删除）。
+ * 与 `putAttachment` 成对放在这一层：R2 的写操作只在 `src/publish/` 出现（§11）。
+ * ⚠️ 不检查正文里是否还引用着这个 URL —— 删了正文里的引用就是坏链，
+ * 这是作者自己的选择（Typecho 同样不检查）。
+ */
+export async function deleteAttachmentObject(env: AttachmentEnv, key: string): Promise<void> {
+	await env.BUCKET.delete(key);
+}

@@ -21,6 +21,13 @@ export interface SiteOptions {
 	description: string;
 	/** 前台规范域名，无末尾斜杠，如 `https://blog.fengqi.me` */
 	siteUrl: string;
+	/**
+	 * 静态资源（附件/图片）域名，无末尾斜杠，如 `https://static.fengqi.me`。
+	 * 正文里插入的图片地址用它拼成完整地址 —— **与站点域名解耦**：换博客域名时
+	 * 已发布的图片地址不受影响（它们指向的是另一个域名）。
+	 * 没配就回落 `siteUrl`（`/usr/uploads/...` 在主域上同样可取）。
+	 */
+	staticUrl: string;
 	keywords: string;
 	/** 分页大小（§5.3 的 page/<n>/ 由它算出） */
 	postsPerPage: number;
@@ -101,10 +108,14 @@ export async function getSiteOptionsVia(db: Db): Promise<SiteOptions> {
 		throw new Error('options.site_url 未配置：前台绝对 URL 全靠它（见 docs/design.md §4.1）');
 	}
 
+	// 静态域名可选：没配就回落到站点域名（附件在主域上同样能取到）
+	const staticUrl = (values.get('static_url') ?? '').trim().replace(/\/+$/, '');
+
 	const value: SiteOptions = {
 		title: values.get('site_title') || OPTION_DEFAULTS.title,
 		description: values.get('site_description') ?? OPTION_DEFAULTS.description,
 		siteUrl,
+		staticUrl: staticUrl || siteUrl,
 		keywords: values.get('site_keywords') ?? OPTION_DEFAULTS.keywords,
 		postsPerPage: parsePostsPerPage(values.get('posts_per_page')),
 		timezoneOffset: parseTimezoneOffset(values.get('timezone')),
@@ -160,6 +171,7 @@ export const SITE_SETTING_KEYS = [
 	'site_description',
 	'site_keywords',
 	'site_url',
+	'static_url',
 	'posts_per_page',
 	'timezone',
 	'turnstile_site_key',

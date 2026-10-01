@@ -57,6 +57,9 @@ const STYLE = `
 }
 
 * { box-sizing: border-box; }
+/* hidden 属性靠 display:none 生效 —— 任何给元素设了 display 的类都会把它盖掉
+   （.side-pane 的 display:grid 就中过招：tab 切了，两个面板却同时可见） */
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
 	margin: 0;
@@ -85,7 +88,7 @@ h2 { margin: 1.75rem 0 0.6rem; font-size: 1.0625rem; font-weight: 650; }
 header.top { border-bottom: 1px solid var(--border); background: var(--bg); }
 
 header.top .top-inner {
-	max-width: 62rem;
+	max-width: 82rem;
 	margin: 0 auto;
 	padding: 0.7rem 1.25rem;
 	display: flex;
@@ -110,7 +113,7 @@ header.top button {
 
 /* --- 主容器 --- */
 
-main { max-width: 62rem; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
+main { max-width: 82rem; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
 
 /* --- 表格 --- */
 
@@ -278,7 +281,114 @@ form.stack .actions button[type=submit]:hover {
 }
 .login h1 { font-size: 1.1875rem; margin-bottom: 0.5rem; }
 
-/* --- 文章编辑器：撰写/预览 tab + Markdown 工具栏（仿 Typecho write-post 的简版，§6.1） --- */
+/* --- 文章编辑器（仿 Typecho write-post：左内容 / 右「选项 + 附件」） --- */
+
+/* 两栏：左写内容，右是选项与附件。窄屏（<64rem）堆成一栏 */
+.editor-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 20rem;
+	gap: 1.5rem;
+	align-items: start;
+}
+.editor-main { display: grid; gap: 1rem; min-width: 0; }
+@media (max-width: 64rem) {
+	.editor-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* 右栏：跟着页面滚（正文很长时不用来回翻），自身超高时内部滚动 */
+.editor-side {
+	position: sticky;
+	top: 1rem;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--bg);
+	overflow: hidden;
+}
+.side-tabs { display: flex; border-bottom: 1px solid var(--border); }
+.side-tabs button {
+	flex: 1;
+	border: 0;
+	border-radius: 0;
+	border-bottom: 2px solid transparent;
+	background: var(--bg-soft);
+	padding: 0.45rem 0.5rem;
+	text-align: center;
+}
+.side-tabs button.active {
+	background: var(--bg);
+	border-bottom-color: var(--accent);
+	color: var(--accent);
+}
+.side-tabs .balloon {
+	display: inline-block;
+	margin-left: 0.25rem;
+	padding: 0 0.35rem;
+	border-radius: 999px;
+	background: var(--accent-soft);
+	color: var(--accent);
+	font-size: 0.75rem;
+}
+
+.side-pane { padding: 0.9rem 1rem; display: grid; gap: 0.9rem; }
+.side-field > label:first-child { margin-bottom: 0.3rem; }
+.side-field .hint { margin: 0.3rem 0 0; }
+.side-actions {
+	display: flex;
+	gap: 0.5rem;
+	flex-wrap: wrap;
+	align-items: center;
+	padding-top: 0.6rem;
+	border-top: 1px solid var(--border);
+}
+.side-actions button, .side-actions a.button { padding: 0.35rem 0.8rem; font-weight: 400; }
+/* 右栏里的主提交也实心（.stack 那条规则只管 form.stack，这里补一条） */
+.editor-side .side-actions button[type=submit] {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: #ffffff;
+}
+.editor-side .side-actions button[type=submit]:hover {
+	background: var(--accent-hover);
+	border-color: var(--accent-hover);
+	color: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+	.editor-side .side-actions button[type=submit] { color: #0b1c33; }
+	.editor-side .side-actions button[type=submit]:hover { color: #0b1c33; }
+}
+
+/* 附件 tab：上传区 + 文件列表（点文件名插入，点删除删附件） */
+.upload-area {
+	display: flex;
+	gap: 0.5rem;
+	align-items: center;
+	justify-content: center;
+	padding: 0.9rem 0.6rem;
+	border: 1px dashed var(--border-strong);
+	border-radius: var(--radius-sm);
+	background: var(--bg-soft);
+}
+.upload-area.drag { border-color: var(--accent); background: var(--accent-soft); }
+
+.file-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; }
+.file-list li {
+	display: flex;
+	gap: 0.5rem;
+	align-items: baseline;
+	font-size: 0.875rem;
+}
+.file-list .insert { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.file-list .info { color: var(--text-muted); font-size: 0.8125rem; white-space: nowrap; }
+.file-list .delete {
+	padding: 0 0.4rem;
+	font-size: 0.75rem;
+	font-weight: 400;
+	color: var(--danger);
+	border-color: var(--border);
+}
+.file-list .delete:hover { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
+.file-list li.loading { color: var(--text-muted); }
+.file-list li.error { color: var(--danger); font-size: 0.8125rem; }
 
 .editor-tabs { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.55rem; }
 .editor-tabs button { padding: 0.18rem 0.85rem; font-weight: 400; }
@@ -291,7 +401,6 @@ form.stack .actions button[type=submit]:hover {
 
 .editor-toolbar { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.55rem; }
 .editor-toolbar button { padding: 0.15rem 0.55rem; font-weight: 400; font-size: 0.8438rem; }
-.editor-toolbar button#btn-image { color: var(--accent); }
 
 /* 预览面板：服务端用发布同款渲染器出 HTML 片段，这里只负责读感（代码/引用/图片宽度） */
 .md-preview {

@@ -11,6 +11,7 @@
 import { Hono } from 'hono';
 import { requireAuth } from './middleware/auth';
 import { adminRoutes } from './routes/admin';
+import { attachmentRoutes } from './routes/attachment';
 import { authRoutes } from './routes/auth';
 import { previewRoutes } from './routes/preview';
 import { runScheduledTasks } from './publish/sync';
@@ -24,13 +25,16 @@ app.get('/message', (c) => c.text('Hello Hono!'));
 // ① 公开路由：登录 / 登出
 app.route('/', authRoutes);
 
-// ② 鉴权：下面注册的 /admin/* 与 /preview/* 都要登录
+// ② 鉴权：下面注册的 /admin/*、/preview/* 与 /usr/* 都要登录
 app.use('/admin/*', requireAuth);
 app.use('/preview/*', requireAuth);
+// 附件读取：正文里的图片是根相对路径，后台域上没人服务 /usr/* 时预览会破图（见 routes/attachment.ts）
+app.use('/usr/*', requireAuth);
 
-// ③ 受保护的后台与预览
+// ③ 受保护的后台、预览与附件读取
 app.route('/', adminRoutes);
 app.route('/', previewRoutes);
+app.route('/', attachmentRoutes);
 
 app.get('/', (c) => c.redirect('/admin', 302));
 

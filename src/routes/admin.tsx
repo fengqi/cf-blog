@@ -12,15 +12,18 @@ import { hashPassword, PBKDF2_ITERATIONS, verifyPassword } from '../lib/auth';
 import { categoryKey, pageCount, postKey } from '../lib/url';
 import { parseDateTimeLocal } from '../lib/time';
 import {
+	attachToContent,
 	countAdminPosts,
 	countNeedsSync,
 	createAttachment,
 	createContent,
+	deleteAttachment,
 	getContentByCid,
 	getEditorView,
 	type ContentInput,
 	listAdminPosts,
 	listAttachments,
+	listAttachmentsByParent,
 	listPostsInCategory,
 	markAllDirty,
 	markNeedsSync,
@@ -43,6 +46,7 @@ import {
 	attachmentContentType,
 	attachmentKey,
 	attachmentUrlPath,
+	deleteAttachmentObject,
 	MAX_ATTACHMENT_BYTES,
 	putAttachment,
 	sanitizeAttachmentFilename,
@@ -81,6 +85,8 @@ interface EditorPayload {
 	input: ContentInput;
 	categoryIds: number[];
 	tagNames: string[];
+	/** 表单里声明的附件（右侧「附件」tab 上传时写入的 hidden input） */
+	attachmentCids: number[];
 }
 
 async function parseEditorForm(c: Context, timezoneOffset: number): Promise<EditorPayload> {
@@ -110,6 +116,8 @@ async function parseEditorForm(c: Context, timezoneOffset: number): Promise<Edit
 						.split(/[,，]/)
 						.map((name) => name.trim())
 						.filter(Boolean),
+		// 附件 cid 与文章类型无关：页面也可能插图
+		attachmentCids: form.getAll('attachments[]').map(Number).filter((n) => Number.isFinite(n) && n > 0),
 	};
 }
 
@@ -189,6 +197,7 @@ adminRoutes.get('/admin/settings', async (c) => {
 				description: options.description,
 				keywords: options.keywords,
 				siteUrl: options.siteUrl,
+				staticUrl: options.staticUrl,
 				postsPerPage: options.postsPerPage,
 				timezoneOffset: options.timezoneOffset,
 				turnstileSiteKey: turnstileSiteKey ?? '',
@@ -217,6 +226,20 @@ adminRoutes.post('/admin/settings', async (c) => {
 		);
 	}
 
+	// 静态域名可选：填了必须和站点域名一样是完整的 http(s) 地址，留空表示回落站点域名
+	const staticUrl = text('static_url').replace(/\/+$/, '');
+	if (staticUrl) {
+		try {
+			const parsed = new URL(staticUrl);
+			if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error('协议必须是 http(s)');
+		} catch {
+			return c.redirect(
+				'/admin/settings?error=' + encodeURIComponent('静态资源域名必须是完整的 http(s) 地址，如 https://static.fengqi.me（不需要就留空）'),
+				303,
+			);
+		}
+	}
+
 	const postsPerPage = Number.parseInt(text('posts_per_page'), 10);
 	if (!(postsPerPage >= 1 && postsPerPage <= 100)) {
 		return c.redirect('/admin/settings?error=' + encodeURIComponent('每页篇数必须是 1~100 的整数'), 303);
@@ -234,6 +257,7 @@ adminRoutes.post('/admin/settings', async (c) => {
 		site_description: text('site_description'),
 		site_keywords: text('site_keywords'),
 		site_url: siteUrl,
+		static_url: staticUrl,
 		posts_per_page: String(postsPerPage),
 		timezone: String(timezone),
 		turnstile_site_key: text('turnstile_site_key'),
@@ -267,7 +291,8 @@ adminRoutes.get('/admin/media', async (c) => {
 	return c.html(
 		<MediaLibraryPage
 			attachments={attachments}
-			siteUrl={options.siteUrl}
+			// 附件是静态资源：链接用静态域名（与站点域名解耦）
+			siteUrl={options.staticUrl}
 			timezoneOffset={options.timezoneOffset}
 			user={c.var.user}
 			message={c.req.query('message')}
@@ -288,6 +313,7 @@ async function uploadAttachmentFile(
 	file: File,
 	authorId: number,
 	timezoneOffset: number,
+	parentId = 0,
 ): Promise<AttachmentUploadOutcome> {
 	const name = sanitizeAttachmentFilename(file.name);
 	if (!name) return { ok: false, reason: `${file.name}：文件名不合法（含 %?# 等字符或为空）` };
@@ -303,6 +329,7 @@ async function uploadAttachmentFile(
 		size: file.size,
 		r2Key: key,
 		authorId,
+		parentId,
 	});
 	return { ok: true, name, key };
 }
@@ -349,13 +376,55 @@ adminRoutes.post('/admin/media/upload', async (c) => {
 	if (!(file instanceof File) || file.size === 0) {
 		return c.json({ error: '没有收到文件' }, 400);
 	}
-	const outcome = await uploadAttachmentFile(c.env, db, file, c.var.user.uid, options.timezoneOffset);
+	// 编辑已有文章时前端会带上 cid：附件直接挂在文章上（Typecho 惯例），
+	// 这样右侧「附件」tab 下次打开还在。新建时没有 cid，由保存时的 `attachments[]` 回填。
+	const parentCid = Number(form.get('cid')) || 0;
+	const outcome = await uploadAttachmentFile(
+		c.env,
+		db,
+		file,
+		c.var.user.uid,
+		options.timezoneOffset,
+		parentCid,
+	);
 	if (!outcome.ok) return c.json({ error: outcome.reason }, 400);
+	const cid = await firstAttachmentCid(db, outcome.key);
 	return c.json({
-		url: attachmentUrlPath(outcome.key),
+		// 返回**完整地址**（静态域名）：后台子域上没有 `/usr/*` 的直出，
+		// 相对路径在预览里必然破图。用独立的静态域名而不是站点域名，
+		// 是为了让正文里的图片地址和博客域名解耦（换域名不影响已发布的图片）。
+		url: `${options.staticUrl}${attachmentUrlPath(outcome.key)}`,
 		name: outcome.name,
+		cid,
 		isImage: (attachmentContentType(outcome.name) ?? '').startsWith('image/'),
 	});
+});
+
+/** 刚写入的附件的 cid（listAttachmentsByParent 查不到 parent=0 的，按 key 反查一次） */
+async function firstAttachmentCid(db: ReturnType<typeof createDb>, r2Key: string): Promise<number> {
+	const row = await db.first<{ cid: number }>(
+		`SELECT cid FROM contents WHERE type = 'attachment' AND r2_key = ?`,
+		[r2Key],
+	);
+	return row?.cid ?? 0;
+}
+
+/**
+ * 编辑器右侧「附件」tab 的快捷删除：D1 行 + R2 对象一起删（JSON，前端摘掉列表项）。
+ * 不检查正文引用 —— 删了就是坏链，作者自己负责（Typecho 同款）。
+ */
+adminRoutes.post('/admin/attachments/:cid/delete', async (c) => {
+	const cid = Number(c.req.param('cid'));
+	if (!Number.isFinite(cid) || cid <= 0) return c.json({ error: '附件 cid 不合法' }, 400);
+	const db = createDb(c.env.DB, 'admin');
+	const row = await db.first<{ cid: number; r2_key: string | null }>(
+		`SELECT cid, r2_key FROM contents WHERE cid = ? AND type = 'attachment'`,
+		[cid],
+	);
+	if (!row) return c.json({ error: '附件不存在' }, 404);
+	if (row.r2_key) await deleteAttachmentObject(c.env, row.r2_key);
+	await deleteAttachment(db, cid);
+	return c.json({ ok: true, cid });
 });
 
 /**
@@ -575,6 +644,8 @@ adminRoutes.get('/admin/posts/new', async (c) => {
 	return c.html(
 		<PostEditorPage
 			categories={categories}
+			attachments={[]} // 还没落库，没有归属可查；本次上传的由前端维护
+			staticUrl={options.staticUrl}
 			user={c.var.user}
 			timezoneOffset={options.timezoneOffset}
 			message={c.req.query('message')}
@@ -587,13 +658,19 @@ adminRoutes.get('/admin/posts/:cid/edit', async (c) => {
 	const cid = Number(c.req.param('cid'));
 	const db = createDb(c.env.DB, 'admin');
 	const options = await getSiteOptions(c.env);
-	const [post, categories] = await Promise.all([getEditorView(db, cid), listTerms(db, 'category')]);
+	const [post, categories, attachments] = await Promise.all([
+		getEditorView(db, cid),
+		listTerms(db, 'category'),
+		listAttachmentsByParent(db, cid), // 右侧「附件」tab 的初始清单
+	]);
 	if (!post) return c.notFound();
 
 	return c.html(
 		<PostEditorPage
 			post={post}
 			categories={categories}
+			attachments={attachments}
+			staticUrl={options.staticUrl}
 			user={c.var.user}
 			timezoneOffset={options.timezoneOffset}
 			message={c.req.query('message')}
@@ -626,6 +703,8 @@ adminRoutes.post('/admin/posts', async (c) => {
 		const cid = await createContent(db, payload.input, c.var.user.uid);
 		const tagIds = await ensureTags(db, payload.tagNames);
 		await setContentTerms(db, cid, categoryIds, tagIds, [], []);
+		// 新建时上传的附件还没有归属（那时没有 cid），保存时补上（Typecho 同款）
+		await attachToContent(db, payload.attachmentCids, cid);
 		const report = await publishPost(c.env, getExecutionContext(c), cid);
 		return c.redirect(
 			`/admin/posts/${cid}/edit?message=` + encodeURIComponent(messageForReport('创建', report)),
@@ -670,6 +749,8 @@ adminRoutes.post('/admin/posts/:cid', async (c) => {
 			existingView?.categoryIds ?? [],
 			[], // 标签用名字重建，旧的 mid 不必参与计数刷新（ensureTags 已覆盖）
 		);
+		// 本次上传的附件挂到这篇文章上（右侧「附件」tab 下次打开还在）
+		await attachToContent(db, payload.attachmentCids, cid);
 
 		const after = await getContentByCid(db, cid);
 		if (

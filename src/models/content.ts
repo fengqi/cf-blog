@@ -624,12 +624,25 @@ export async function listAttachments(db: Db, limit = 200): Promise<AttachmentRo
 	);
 }
 
+/** 某篇文章名下的附件（编辑器右侧「附件」tab 的初始清单，新→旧） */
+export async function listAttachmentsByParent(db: Db, parentCid: number): Promise<AttachmentRow[]> {
+	return await db.all<AttachmentRow>(
+		`SELECT cid, title, created, mime, size, r2_key
+		   FROM contents
+		  WHERE type = 'attachment' AND parent = ? AND r2_key IS NOT NULL
+		  ORDER BY created DESC, cid DESC`,
+		[parentCid],
+	);
+}
+
 export interface AttachmentInput {
 	title: string;
 	mime: string;
 	size: number;
 	r2Key: string;
 	authorId: number;
+	/** 归属文章（Typecho 惯例：附件的 parent 指向文章 cid）；无归属传 0 */
+	parentId?: number;
 }
 
 /** 附件落库：needs_sync = 0 —— 附件不进内容渲染流水线，文件本体在上传时直接写 R2 */
@@ -641,10 +654,34 @@ export async function createAttachment(db: Db, input: AttachmentInput): Promise<
 	const result = await db.run(
 		`INSERT INTO contents (title, slug, created, modified, body, rendered, excerpt, sort_order,
 		                       author_id, type, status, allow_feed, parent, words, mime, size, r2_key, needs_sync)
-		 VALUES (?, ?, ?, ?, '', '', NULL, 0, ?, 'attachment', 'publish', 0, 0, 0, ?, ?, ?, 0)`,
-		[input.title, crypto.randomUUID(), now, now, input.authorId, input.mime, input.size, input.r2Key],
+		 VALUES (?, ?, ?, ?, '', '', NULL, 0, ?, 'attachment', 'publish', 0, ?, 0, ?, ?, ?, 0)`,
+		[
+			input.title,
+			crypto.randomUUID(),
+			now,
+			now,
+			input.authorId,
+			input.parentId ?? 0,
+			input.mime,
+			input.size,
+			input.r2Key,
+		],
 	);
 	return Number(result.meta.last_row_id);
+}
+
+/** 把附件挂到文章上（表单里的 `attachments[]` 在文章落库后回填 parent，Typecho 同款做法） */
+export async function attachToContent(db: Db, attachmentCids: number[], parentCid: number): Promise<void> {
+	if (attachmentCids.length === 0) return;
+	await db.run(
+		`UPDATE contents SET parent = ? WHERE type = 'attachment' AND cid IN (${attachmentCids.map(() => '?').join(',')})`,
+		[parentCid, ...attachmentCids],
+	);
+}
+
+/** 删除附件：只删 `type='attachment'` 的行（R2 上的对象由 publish/attachments 负责） */
+export async function deleteAttachment(db: Db, cid: number): Promise<void> {
+	await db.run(`DELETE FROM contents WHERE cid = ? AND type = 'attachment'`, [cid]);
 }
 
 // ---------------------------------------------------------------------------

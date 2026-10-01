@@ -153,6 +153,21 @@ metas 281（7 分类 + 274 标签）、relationships 529、permalink_history 2�
 本地与线上逐 key 比，**只应差 theme 指纹**（本地是新构建）。附件的 content-type 要抽查
 （`image/png` / `image/jpeg`）。
 
+## 后台页面（admin）的量法
+
+后台是登录态页面，e2e worker 的 fetch **任何路径都跑测试套件**（`curl /admin/login` 返回的
+也是 e2e 报告），所以浏览器没法直接登录 8788。要量后台版面：用 `tsx` 直接调用 view 函数
+生成 HTML（`PostEditorPage({...})` 当普通函数调，别写 JSX——临时脚本没有项目的
+jsxImportSource，会报 `React is not defined`），写到 `/tmp` 再用 Chrome 打开 `file://`。
+样式是内联的，不需要起服务。
+
+### 内联样式的两个坑（layout.tsx 的 STYLE 是 TS 模板字符串）
+
+1. **给元素设了 `display` 的类会盖掉 `hidden` 属性**（`.side-pane { display: grid }` 中过招：
+   切 tab 两个面板同时可见）。STYLE 里已加全局 `[hidden] { display: none !important; }`。
+2. **CSS 注释里不能出现反引号** —— 会把模板字符串截断，esbuild 报
+   `Expected ";" but found "hidden"`（错误信息指向的行号在字符串内部，很难一眼看穿）。
+
 ## 无头浏览器视觉验收（本机可用）
 
 `playwright-core` 装在托管工作区（不在项目 node_modules），浏览器直接用系统 Chrome：
@@ -202,6 +217,23 @@ margin-inline: auto;` —— CSS Grid 里 grid item 带 `auto` 外边距会放�
 
 用 `preview:r2` 的 `/__keys`（见上）列对象、直接按路径 curl/Chrome 打开即可，
 **不用再手动导出**。只有在要看线上桶时才用 `--remote` 模式。
+
+## 正文里的图片地址：绝对地址 + **独立静态域名**（风息 2026-10-01 拍板）
+
+- 编辑器插入图片写完整地址，域名取自 **`options.static_url`**（新增配置项，可空，
+  没配回落 `site_url`）—— 与站点域名**解耦**：换博客域名时已发布的图片地址不受影响。
+  前提：该 hostname 要能取到同一桶的 `/usr/uploads/...`（R2 自定义域名或 CDN 回源），**路径不能变**。
+  设置页「静态资源域名」字段；改它**不需要**全站重渲（地址已写进正文，不是渲染期拼的）。
+  媒体库页的附件链接也走 static_url。
+- 之所以是绝对地址：后台子域上没有 `/usr/*` 的直出，相对路径在预览里必然破图。
+  ⚠️ 代价（已知，他接受）：域名焊进正文；本地预览会打真线上。
+  **存量 227 篇仍是相对路径**（迁移自 Typecho），两种形式并存。
+- 后台 `GET /usr/*`（`src/routes/attachment.ts`，走 requireAuth）**保留**：兜住存量正文的
+  相对路径，也让本地预览能取到本地 R2。`c.req.path` 要 `decodeURIComponent` 还原中文/空格。
+- ⚠️ 插入时要 `mdUrl()` 把空格转 `%20`：Markdown 链接里的空格会截断语法
+  （截图文件名常带空格，macOS 的 "Screenshot 2026-10-01 at 12.30.44.png"）。
+- ⚠️ **同源遗留没修**：整页预览 `/preview/:cid` 引用的 `/theme/style.<hash>.css`
+  在后台域取不到 → 整页预览是裸的（无样式）。修法同 `/usr/*` 再开一条 `/theme/*`（等他定）。
 
 ## 环境坑
 

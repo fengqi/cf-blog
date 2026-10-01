@@ -140,6 +140,14 @@ Cloudflare 的 URL Rewrite **不能改写 hostname**（只能改 path 和 query�
 > 正文里写死的 `fengqi.me` 与 `img-typecho-r2.fengqi.me` 绝对链接（见 §9）不受影响，
 > 前提是这两个 hostname 一直能解析到。
 
+> ✅ **静态资源域名：`options.static_url`（2026-10-01 新增，可空）**
+>
+> 编辑器插入图片时写的是**完整地址**，域名取自 `static_url` 而不是 `site_url` ——
+> 让正文里的图片地址与博客域名**解耦**：以后换博客域名（上面那三步），
+> 已发布文章里的图片地址不受影响。没配就回落 `site_url`。
+> 前提：这个 hostname 要能取到同一个桶里的 `/usr/uploads/...`（R2 自定义域名或 CDN 回源），
+> **路径不能变**。存量正文（相对路径 / 旧绝对地址）不受影响。
+
 **主域名（R2）：`blog.fengqi.me`**
 
 | 路径                                                    | 内容                           |
@@ -163,8 +171,10 @@ Cloudflare 的 URL Rewrite **不能改写 hostname**（只能改 path 和 query�
 | `/admin/login`  | 登录（带 Turnstile）             |
 | `/admin/*`      | 写作、内容管理、设置                  |
 | `/admin/preview` | 编辑器预览（textarea 当前内容 → 服务端渲染成 HTML 片段；只在作者手动切 tab 时触发，是「渲染不进请求路径」在后台的**故意例外**） |
-| `/admin/media/upload` | 编辑器快速传图（单文件 JSON 端点，与媒体库同一套 §9 校验，前端把 `![](url)` 插到光标处） |
+| `/admin/media/upload` | 编辑器右侧「附件」tab 上传（单文件 JSON 端点，与媒体库同一套 §9 校验；带 `cid` 时附件直接挂在文章上） |
+| `/admin/attachments/:cid/delete` | 「附件」tab 的快捷删除（D1 行 + R2 对象一起删；不检查正文引用，同 Typecho） |
 | `/preview/:cid` | 草稿预览（未发布的文章不存在于 R2，只能在这里渲染） |
+| `/usr/*` | 后台域上的附件读取（正文里的图片是根相对路径，后台子域没有这条路由就会破图；同样要登录） |
 
 **代价要说清楚**：
 

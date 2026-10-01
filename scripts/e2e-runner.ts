@@ -698,7 +698,21 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('编辑器能打开', editView.status === 200 && editHtml.includes('name="body"'));
 	check(
 		'编辑器带工具栏、预览 tab 与传图入口',
-		editHtml.includes('id="editor-toolbar"') && editHtml.includes('data-cmd="bold"') && editHtml.includes('id="md-preview"') && editHtml.includes('id="image-input"'),
+		editHtml.includes('id="editor-toolbar"') && editHtml.includes('data-cmd="bold"') && editHtml.includes('id="md-preview"') && editHtml.includes('data-cmd="image"'),
+	);
+	check(
+		'编辑器是左右栏：选项/附件 tab、上传区与文件列表',
+		editHtml.includes('class="editor-grid"') &&
+			editHtml.includes('data-side-tab="options"') &&
+			editHtml.includes('data-side-tab="files"') &&
+			editHtml.includes('id="upload-area"') &&
+			editHtml.includes('id="file-list"'),
+	);
+	check(
+		'分类/状态/标签挪到右栏（与 Typecho write-post 同款）',
+		editHtml.includes('id="side-options"') &&
+			editHtml.indexOf('id="side-options"') < editHtml.indexOf('id="tags"') &&
+			editHtml.includes('name="allow_feed"'),
 	);
 
 	const publishForm = await postForm(
@@ -826,13 +840,61 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	const quickForm = new FormData();
 	quickForm.append('file', new File([new Uint8Array([137, 80, 78, 71])], 'e2e 编辑器图.png', { type: 'image/png' }));
 	const quickRes = await call('/admin/media/upload', { method: 'POST', body: quickForm, headers: { cookie: cookie2 } });
-	const quickJson = (await quickRes.json()) as { url?: string; name?: string; isImage?: boolean };
+	const quickJson = (await quickRes.json()) as { url?: string; name?: string; cid?: number; isImage?: boolean };
+	// 没配 static_url 时回落到站点域名（设置页那个字段是可空的）
 	check(
-		'快速传图返回插入用 URL',
-		quickRes.status === 200 && /^\/usr\/uploads\/\d{4}\/\d{2}\/e2e 编辑器图\.png$/.test(quickJson.url ?? '') && quickJson.isImage === true,
+		'快速传图返回完整 URL（未配静态域名时回落站点域名）',
+		quickRes.status === 200 &&
+			/^https:\/\/blog\.fengqi\.me\/usr\/uploads\/\d{4}\/\d{2}\/e2e 编辑器图\.png$/.test(quickJson.url ?? '') &&
+			quickJson.isImage === true,
 		JSON.stringify(quickJson),
 	);
-	const quickObj = await env.BUCKET.get((quickJson.url ?? '').slice(1));
+
+	// 配了静态域名后，插入的图片地址就走它（与站点域名解耦）
+	const staticForm = await postForm(
+		'/admin/settings',
+		{
+			site_title: 'e2e 标题',
+			site_description: 'e2e 描述',
+			site_keywords: 'e2e',
+			site_url: 'https://blog.fengqi.me',
+			static_url: 'https://static.fengqi.me',
+			posts_per_page: '5',
+			timezone: '8',
+			turnstile_site_key: '',
+		},
+		cookie2,
+	);
+	check('静态域名能保存', staticForm.status === 303, String(staticForm.status));
+	const staticQuick = new FormData();
+	staticQuick.append('file', new File([new Uint8Array([137, 80, 78, 71])], 'e2e 静态图.png', { type: 'image/png' }));
+	const staticRes = await call('/admin/media/upload', { method: 'POST', body: staticQuick, headers: { cookie: cookie2 } });
+	const staticJson = (await staticRes.json()) as { url?: string };
+	check(
+		'配了静态域名：插入的图片地址用它（不再用 site_url）',
+		(staticJson.url ?? '').startsWith('https://static.fengqi.me/usr/uploads/'),
+		staticJson.url,
+	);
+	const staticRow = await all<{ value: string }>("SELECT value FROM options WHERE name = 'static_url' AND user = 0");
+	check('静态域名落库', staticRow[0]?.value === 'https://static.fengqi.me', staticRow[0]?.value);
+	// 改回来，别影响后面的断言
+	await postForm(
+		'/admin/settings',
+		{
+			site_title: 'e2e 标题',
+			site_description: 'e2e 描述',
+			site_keywords: 'e2e',
+			site_url: 'https://blog.fengqi.me',
+			static_url: '',
+			posts_per_page: '5',
+			timezone: '8',
+			turnstile_site_key: '',
+		},
+		cookie2,
+	);
+	// 剥掉域名就是 R2 key 的路径部分（后台 /usr/* 路由的测试要用相对路径）
+	const quickPath = (quickJson.url ?? '').replace('https://blog.fengqi.me', '');
+	const quickObj = await env.BUCKET.get(decodeURIComponent(quickPath).slice(1));
 	check('快速传图写进 R2', quickObj !== null && quickObj.httpMetadata?.contentType === 'image/png');
 
 	// 同秒连传第二个附件：createAttachment 的 slug 曾用秒级时间戳，撞 UNIQUE(type, slug) 必 500
@@ -840,6 +902,45 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	quickForm2.append('file', new File([new Uint8Array([137, 80, 78, 71])], 'e2e 编辑器图2.png', { type: 'image/png' }));
 	const quickRes2 = await call('/admin/media/upload', { method: 'POST', body: quickForm2, headers: { cookie: cookie2 } });
 	check('同一秒内连传两个附件不撞唯一约束', quickRes2.status === 200, String(quickRes2.status));
+	const quickJson2 = (await quickRes2.json()) as { cid?: number; url?: string };
+
+	// 编辑器右侧「附件」tab 的快捷删除（D1 行 + R2 对象一起删）
+	const delAtt = await call(`/admin/attachments/${quickJson2.cid}/delete`, {
+		method: 'POST',
+		headers: { cookie: cookie2 },
+	});
+	const delAttBody = (await delAtt.json()) as { ok?: boolean };
+	check('附件删除端点返回 ok', delAtt.status === 200 && delAttBody.ok === true, String(delAtt.status));
+	check(
+		'删除后 R2 对象与 D1 行都没了',
+		(await env.BUCKET.get((quickJson2.url ?? '').slice(1))) === null &&
+			(await all<{ cid: number }>('SELECT cid FROM contents WHERE cid = ?', [quickJson2.cid ?? 0])).length === 0,
+	);
+	const delAttAgain = await call(`/admin/attachments/${quickJson2.cid}/delete`, {
+		method: 'POST',
+		headers: { cookie: cookie2 },
+	});
+	check('删不存在的附件返回 404', delAttAgain.status === 404, String(delAttAgain.status));
+
+	// 后台域上的附件读取：存量正文里的图片是根相对路径 /usr/uploads/... ，
+	// 后台没人服务就是预览破图（新插入的已是绝对地址，这条路由兜的是存量）
+	const attPathRes = await call(quickPath, { headers: { cookie: cookie2 } });
+	const attPathType = attPathRes.headers.get('content-type') ?? '';
+	check(
+		'后台域能取到 /usr/uploads/ 下的附件（预览不破图）',
+		attPathRes.status === 200 && attPathType === 'image/png',
+		`${attPathRes.status} ${attPathType}`,
+	);
+	const attPathNoAuth = await call(quickPath);
+	check(
+		'附件读取也要登录（不给后台域开公开入口）',
+		attPathNoAuth.status === 302 && (attPathNoAuth.headers.get('location') ?? '').includes('/admin/login'),
+		String(attPathNoAuth.status),
+	);
+	const attEncoded = await call(encodeURI(quickPath), { headers: { cookie: cookie2 } });
+	check('中文/空格文件名按 URL 编码请求也能取到', attEncoded.status === 200, String(attEncoded.status));
+	const attMissing = await call('/usr/uploads/2026/10/不存在.png', { headers: { cookie: cookie2 } });
+	check('附件不存在返回 404', attMissing.status === 404, String(attMissing.status));
 
 	const quickTxtForm = new FormData();
 	quickTxtForm.append('file', new File(['x'], 'bad.txt', { type: 'text/plain' }));
@@ -860,6 +961,39 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 
 	const previewNoAuth = await call('/admin/preview', { method: 'POST', body: previewForm });
 	check('预览端点必须登录', previewNoAuth.status === 302 && (previewNoAuth.headers.get('location') ?? '').includes('/admin/login'));
+
+	// 编辑器「附件」tab 上传的附件随表单提交（attachments[]），保存后挂到文章上（Typecho 同款）
+	const attachPostForm = new FormData();
+	attachPostForm.append('title', '带附件的文章');
+	attachPostForm.append('slug', 'with-attachment');
+	attachPostForm.append('type', 'post');
+	attachPostForm.append('status', 'publish');
+	attachPostForm.append('created', '2026-10-01T10:00');
+	attachPostForm.append('body', '正文里插了图：![](' + quickJson.url + ')');
+	attachPostForm.append('excerpt', '');
+	attachPostForm.append('categories', '1');
+	attachPostForm.append('tags', '附件');
+	attachPostForm.append('allow_feed', '1');
+	attachPostForm.append('attachments[]', String(quickJson.cid ?? 0));
+	const attachPostRes = await call('/admin/posts', {
+		method: 'POST',
+		body: attachPostForm,
+		headers: { cookie: cookie2 },
+	});
+	await Promise.allSettled(waits.splice(0));
+	const attachPostRow = await all<{ cid: number }>("SELECT cid FROM contents WHERE slug = 'with-attachment'");
+	const attachedRow = await all<{ parent: number }>('SELECT parent FROM contents WHERE cid = ?', [
+		quickJson.cid ?? 0,
+	]);
+	check(
+		'保存时把 attachments[] 挂到文章上（右侧「附件」tab 下次还在）',
+		attachPostRes.status === 303 && attachedRow[0]?.parent === attachPostRow[0]?.cid,
+		`parent=${attachedRow[0]?.parent} post=${attachPostRow[0]?.cid}`,
+	);
+	const attachEditHtml = await (
+		await call(`/admin/posts/${attachPostRow[0]?.cid}/edit`, { headers: { cookie: cookie2 } })
+	).text();
+	check('重开编辑器时附件清单里带上刚传的图', attachEditHtml.includes('e2e 编辑器图.png') && attachEditHtml.includes('class="insert"'));
 
 	// 分类管理：创建 / 查重 / slug 变更（URL 走方案 A）/ 删除守卫与主分类顺延
 	lines.push('=== 分类管理 ===');

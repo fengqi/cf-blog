@@ -42,10 +42,12 @@ import { getUserById, updatePassword } from '../models/user';
 import {
 	attachmentContentType,
 	attachmentKey,
+	attachmentUrlPath,
 	MAX_ATTACHMENT_BYTES,
 	putAttachment,
 	sanitizeAttachmentFilename,
 } from '../publish/attachments';
+import { renderMarkdown } from '../lib/markdown';
 import { deleteObjects, deletePost, publishPost, rebuildTargetsSlice } from '../publish/pipeline';
 import { reconcileNeedsSync } from '../publish/sync';
 import { hasUrl, postKeyOf, TARGET_GROUPS, type TargetGroup } from '../publish/targets';
@@ -275,6 +277,37 @@ adminRoutes.get('/admin/media', async (c) => {
 });
 
 /**
+ * 单文件上传（§9 校验 → 写 R2 → 元信息落 D1）。媒体库页与编辑器快速传图共用：
+ * 媒体库页把结果拼成整页跳转消息，编辑器的 JSON 端点把它变成 `{url}` 供光标处插入。
+ */
+type AttachmentUploadOutcome = { ok: true; name: string; key: string } | { ok: false; reason: string };
+
+async function uploadAttachmentFile(
+	env: AdminEnv,
+	db: ReturnType<typeof createDb>,
+	file: File,
+	authorId: number,
+	timezoneOffset: number,
+): Promise<AttachmentUploadOutcome> {
+	const name = sanitizeAttachmentFilename(file.name);
+	if (!name) return { ok: false, reason: `${file.name}：文件名不合法（含 %?# 等字符或为空）` };
+	const contentType = attachmentContentType(name);
+	if (!contentType) return { ok: false, reason: `${name}：类型不在白名单（jpg/png/webp/gif/avif/pdf）` };
+	if (file.size > MAX_ATTACHMENT_BYTES) return { ok: false, reason: `${name}：超过 10MB` };
+	const key = attachmentKey(Math.floor(Date.now() / 1000), timezoneOffset, name);
+	const result = await putAttachment(env, key, await file.arrayBuffer(), contentType);
+	if (!result.ok) return { ok: false, reason: `${name}：${result.reason}` };
+	await createAttachment(db, {
+		title: name,
+		mime: contentType,
+		size: file.size,
+		r2Key: key,
+		authorId,
+	});
+	return { ok: true, name, key };
+}
+
+/**
  * 附件上传（§9）：校验类型/大小 → 写 R2（immutable，不可覆盖）→ 元信息落 D1。
  * 附件不进渲染流水线（needs_sync=0），所以这里没有 waitUntil / 发布动作。
  */
@@ -288,38 +321,12 @@ adminRoutes.post('/admin/media', async (c) => {
 		return c.redirect('/admin/media?error=' + encodeURIComponent('没有选择文件'), 303);
 	}
 
-	const now = Math.floor(Date.now() / 1000);
 	const uploaded: string[] = [];
 	const failed: string[] = [];
 	for (const file of files) {
-		const name = sanitizeAttachmentFilename(file.name);
-		if (!name) {
-			failed.push(`${file.name}：文件名不合法（含 %?# 等字符或为空）`);
-			continue;
-		}
-		const contentType = attachmentContentType(name);
-		if (!contentType) {
-			failed.push(`${name}：类型不在白名单（jpg/png/webp/gif/avif/pdf）`);
-			continue;
-		}
-		if (file.size > MAX_ATTACHMENT_BYTES) {
-			failed.push(`${name}：超过 10MB`);
-			continue;
-		}
-		const key = attachmentKey(now, options.timezoneOffset, name);
-		const result = await putAttachment(c.env, key, await file.arrayBuffer(), contentType);
-		if (!result.ok) {
-			failed.push(`${name}：${result.reason}`);
-			continue;
-		}
-		await createAttachment(db, {
-			title: name,
-			mime: contentType,
-			size: file.size,
-			r2Key: key,
-			authorId: c.var.user.uid,
-		});
-		uploaded.push(name);
+		const outcome = await uploadAttachmentFile(c.env, db, file, c.var.user.uid, options.timezoneOffset);
+		if (outcome.ok) uploaded.push(outcome.name);
+		else failed.push(outcome.reason);
 	}
 
 	if (uploaded.length === 0) {
@@ -328,6 +335,40 @@ adminRoutes.post('/admin/media', async (c) => {
 	const message =
 		failed.length > 0 ? `上传 ${uploaded.length} 个；失败 ${failed.length} 个：${failed.join('；')}` : `已上传 ${uploaded.join('、')}`;
 	return c.redirect('/admin/media?message=' + encodeURIComponent(message), 303);
+});
+
+/**
+ * 编辑器快速传图（仿 Typecho write-post 的附件插入）：单文件 JSON 端点，
+ * 与媒体库同一套校验/落库，前端拿到 `{url}` 后把 Markdown 插到光标处。
+ */
+adminRoutes.post('/admin/media/upload', async (c) => {
+	const db = createDb(c.env.DB, 'admin');
+	const options = await getSiteOptions(c.env);
+	const form = await c.req.formData();
+	const file = form.get('file');
+	if (!(file instanceof File) || file.size === 0) {
+		return c.json({ error: '没有收到文件' }, 400);
+	}
+	const outcome = await uploadAttachmentFile(c.env, db, file, c.var.user.uid, options.timezoneOffset);
+	if (!outcome.ok) return c.json({ error: outcome.reason }, 400);
+	return c.json({
+		url: attachmentUrlPath(outcome.key),
+		name: outcome.name,
+		isImage: (attachmentContentType(outcome.name) ?? '').startsWith('image/'),
+	});
+});
+
+/**
+ * 编辑器预览：把 textarea 的当前内容渲染成 HTML 片段，用发布流水线**同一套**
+ * `renderMarkdown`（markdown-it + 白名单清洗）—— 预览和最终发布结果永远一致。
+ * 在请求路径上跑渲染是这里**故意的例外**：它只服务登录后的作者、手动切 tab 才触发，
+ * 与前台 R2 直出的性能铁律（§6）无关；`renderPreview`（/preview/:cid）渲染的是
+ * 已落库的 `rendered` 字段，而这里的内容还没保存过。
+ */
+adminRoutes.post('/admin/preview', async (c) => {
+	const form = await c.req.formData();
+	const body = String(form.get('body') ?? '');
+	return c.html(renderMarkdown(body));
 });
 
 adminRoutes.get('/admin/password', async (c) => {

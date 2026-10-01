@@ -694,7 +694,12 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 
 	// 走表单改缩略名 —— 顺便验证 §5.1 方案 A（旧 URL 保留 canonical）
 	const editView = await call('/admin/posts/101/edit', { headers: { cookie: sessionCookie } });
-	check('编辑器能打开', editView.status === 200 && (await editView.text()).includes('name="body"'));
+	const editHtml = await editView.text();
+	check('编辑器能打开', editView.status === 200 && editHtml.includes('name="body"'));
+	check(
+		'编辑器带工具栏、预览 tab 与传图入口',
+		editHtml.includes('id="editor-toolbar"') && editHtml.includes('data-cmd="bold"') && editHtml.includes('id="md-preview"') && editHtml.includes('id="image-input"'),
+	);
 
 	const publishForm = await postForm(
 		'/admin/posts/101',
@@ -816,6 +821,45 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 
 	const mediaAfter = await (await call('/admin/media', { headers: { cookie: cookie2 } })).text();
 	check('媒体库列表显示新附件', mediaAfter.includes('e2e 图片.png') && mediaAfter.includes('data-copy'));
+
+	// 编辑器快速传图端点（单文件 JSON，与媒体库同一套校验）
+	const quickForm = new FormData();
+	quickForm.append('file', new File([new Uint8Array([137, 80, 78, 71])], 'e2e 编辑器图.png', { type: 'image/png' }));
+	const quickRes = await call('/admin/media/upload', { method: 'POST', body: quickForm, headers: { cookie: cookie2 } });
+	const quickJson = (await quickRes.json()) as { url?: string; name?: string; isImage?: boolean };
+	check(
+		'快速传图返回插入用 URL',
+		quickRes.status === 200 && /^\/usr\/uploads\/\d{4}\/\d{2}\/e2e 编辑器图\.png$/.test(quickJson.url ?? '') && quickJson.isImage === true,
+		JSON.stringify(quickJson),
+	);
+	const quickObj = await env.BUCKET.get((quickJson.url ?? '').slice(1));
+	check('快速传图写进 R2', quickObj !== null && quickObj.httpMetadata?.contentType === 'image/png');
+
+	// 同秒连传第二个附件：createAttachment 的 slug 曾用秒级时间戳，撞 UNIQUE(type, slug) 必 500
+	const quickForm2 = new FormData();
+	quickForm2.append('file', new File([new Uint8Array([137, 80, 78, 71])], 'e2e 编辑器图2.png', { type: 'image/png' }));
+	const quickRes2 = await call('/admin/media/upload', { method: 'POST', body: quickForm2, headers: { cookie: cookie2 } });
+	check('同一秒内连传两个附件不撞唯一约束', quickRes2.status === 200, String(quickRes2.status));
+
+	const quickTxtForm = new FormData();
+	quickTxtForm.append('file', new File(['x'], 'bad.txt', { type: 'text/plain' }));
+	const quickTxtRes = await call('/admin/media/upload', { method: 'POST', body: quickTxtForm, headers: { cookie: cookie2 } });
+	check('快速传图拒绝白名单外类型', quickTxtRes.status === 400);
+
+	// 编辑器预览端点（发布同款渲染器 + 白名单清洗）
+	const previewForm = new FormData();
+	previewForm.append('body', '# 预览标题\n\n**加粗** <script>alert(1)</script>');
+	const previewRes = await call('/admin/preview', { method: 'POST', body: previewForm, headers: { cookie: cookie2 } });
+	const previewFrag = await previewRes.text();
+	check(
+		'预览端点渲染 Markdown',
+		previewRes.status === 200 && previewFrag.includes('<h1>预览标题</h1>') && previewFrag.includes('<strong>加粗</strong>'),
+	);
+	check('预览端点输出已清洗', !previewFrag.includes('<script>alert(1)</script>'));
+	check('预览端点不缓存', (previewRes.headers.get('cache-control') ?? '').includes('no-store'));
+
+	const previewNoAuth = await call('/admin/preview', { method: 'POST', body: previewForm });
+	check('预览端点必须登录', previewNoAuth.status === 302 && (previewNoAuth.headers.get('location') ?? '').includes('/admin/login'));
 
 	// 分类管理：创建 / 查重 / slug 变更（URL 走方案 A）/ 删除守卫与主分类顺延
 	lines.push('=== 分类管理 ===');

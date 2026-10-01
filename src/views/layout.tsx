@@ -278,6 +278,61 @@ form.stack .actions button[type=submit]:hover {
 }
 .login h1 { font-size: 1.1875rem; margin-bottom: 0.5rem; }
 
+/* --- 文章编辑器：撰写/预览 tab + Markdown 工具栏（仿 Typecho write-post 的简版，§6.1） --- */
+
+.editor-tabs { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.55rem; }
+.editor-tabs button { padding: 0.18rem 0.85rem; font-weight: 400; }
+.editor-tabs button.active {
+	border-color: var(--accent);
+	color: var(--accent);
+	background: var(--accent-soft);
+}
+.editor-tabs .status { margin-left: auto; font-size: 0.8125rem; color: var(--text-muted); }
+
+.editor-toolbar { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.55rem; }
+.editor-toolbar button { padding: 0.15rem 0.55rem; font-weight: 400; font-size: 0.8438rem; }
+.editor-toolbar button#btn-image { color: var(--accent); }
+
+/* 预览面板：服务端用发布同款渲染器出 HTML 片段，这里只负责读感（代码/引用/图片宽度） */
+.md-preview {
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-sm);
+	padding: 0.9rem 1.15rem;
+	min-height: 24rem;
+	overflow-wrap: break-word;
+}
+.md-preview > *:first-child { margin-top: 0; }
+.md-preview h1, .md-preview h2, .md-preview h3, .md-preview h4 { margin: 1.3rem 0 0.45rem; line-height: 1.4; }
+.md-preview h1 { font-size: 1.25rem; }
+.md-preview h2 { font-size: 1.1rem; }
+.md-preview h3 { font-size: 1rem; }
+.md-preview p { margin: 0.65rem 0; }
+.md-preview img { max-width: 100%; height: auto; }
+.md-preview code {
+	font-family: var(--font-mono);
+	font-size: 0.85em;
+	background: var(--bg-soft);
+	border-radius: 3px;
+	padding: 0.1em 0.3em;
+}
+.md-preview pre {
+	background: var(--bg-soft);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 0.75rem 0.95rem;
+	overflow: auto;
+}
+.md-preview pre code { padding: 0; background: none; }
+.md-preview blockquote {
+	margin: 0.8rem 0;
+	padding: 0.1rem 0.9rem;
+	border-left: 3px solid var(--border-strong);
+	color: var(--text-soft);
+}
+.md-preview ul, .md-preview ol { margin: 0.65rem 0; padding-left: 1.5rem; }
+.md-preview hr { border: 0; border-top: 1px solid var(--border-strong); margin: 1.4rem 0; }
+.md-preview table { margin: 0.8rem 0; }
+
 @media (prefers-reduced-motion: reduce) {
 	* { transition: none !important; }
 }

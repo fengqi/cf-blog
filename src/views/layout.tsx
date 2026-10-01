@@ -186,11 +186,20 @@ tbody tr:hover td { background: var(--bg-soft); }
 form.stack { display: grid; gap: 1rem; max-width: 46rem; margin-inline: auto; }
 /* 与窄表单同宽的区块：46rem 的表单下面接一张撑满 82rem 的表，左右不齐 */
 .stack-block { max-width: 46rem; margin-inline: auto; }
-/* 单元格 padding 会把首/末列往里推 0.6rem，跟上面贴着容器边的输入框对不齐 */
-.stack-block table th:first-child,
-.stack-block table td:first-child { padding-left: 0; }
-.stack-block table th:last-child,
-.stack-block table td:last-child { padding-right: 0; }
+/* 单元格 padding 会把首/末列往里推 0.6rem。首末两列的外侧归零：
+   首列文字与标题/输入框左边缘齐，末列按钮贴容器右边缘（否则 width:100% 的
+   自动布局把多余宽度摊进末列，操作按钮右边空出一大截）。
+   选择器限定 main > table 与 .stack-block —— 别波及 .md-preview 里的正文表格 */
+main > table th:first-child, .stack-block table th:first-child,
+main > table td:first-child, .stack-block table td:first-child { padding-left: 0; }
+main > table th:last-child, .stack-block table th:last-child,
+main > table td:last-child, .stack-block table td:last-child {
+	padding-right: 0;
+	text-align: right;
+}
+/* 操作列的按钮组跟着末列右对齐（div 占满格宽，text-align 管不到 flex 子项） */
+main > table td:last-child .actions,
+.stack-block table td:last-child .actions { justify-content: flex-end; }
 label { display: block; font-weight: 600; margin-bottom: 0.3rem; }
 
 input[type=text], input[type=password], input[type=datetime-local], input[type=number], textarea, select {
@@ -279,8 +288,10 @@ button.danger:hover, a.button.danger:hover {
 	flex-wrap: wrap;
 	margin: 0 0 1rem;
 }
-.filter-bar input[type=text] { flex: 1 1 12rem; width: auto; }
-.filter-bar select { flex: 0 1 auto; width: auto; }
+.filter-bar input[type=text] { flex: 1 1 12rem; width: auto; min-width: 6rem; }
+/* select 绝不收缩：flex-shrink 会把它压得比内容窄，原生下拉箭头压到文字、
+   挤到旁边的按钮上；空间不够时让整条 wrap（.filter-bar 本身 flex-wrap: wrap） */
+.filter-bar select { flex: 0 0 auto; width: auto; }
 .filter-bar button, .filter-bar a.button { padding: 0.35rem 0.8rem; font-weight: 400; }
 
 /* 渲染维护页：两块独立操作 */

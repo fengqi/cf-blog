@@ -25,7 +25,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { countWords, extractText, makeExcerpt, renderMarkdown } from '../src/lib/markdown';
+import { countWords, extractText, MORE_SENTINEL, renderMarkdown, splitMoreMarker } from '../src/lib/markdown';
 import { sanitizeHtml } from '../src/lib/sanitize';
 
 // ---------------------------------------------------------------------------
@@ -378,7 +378,6 @@ interface NewContent {
 	r2_key: string | null;
 }
 
-const MORE_MARKER = /<!--\s*more\s*-->/i;
 /**
  * Typecho 的正文格式开关：保存时若启用了 Markdown，正文开头会写一个 `<!--markdown-->` 标记，
  * 渲染时**只有带标记的才走 markdown**，其余原样当 HTML 输出（Typecho_Abstract_Contents::filter）。
@@ -421,13 +420,12 @@ function buildContentRow(
 	const source = isMarkdown ? body.replace(MARKDOWN_MARKER, '') : body;
 	const renderSource = (text: string) => (isMarkdown ? renderMarkdown(text) : sanitizeHtml(text));
 
-	// `<!--more-->` 是摘要分界：前半段当自定义摘要（保留 Markdown/HTML 原文，首页渲染时再转），
-	// 正文里的标记去掉
-	const moreIndex = source.search(MORE_MARKER);
-	const excerptSource = moreIndex >= 0 ? source.slice(0, moreIndex).trim() : '';
-	const cleanBody = source.replace(MORE_MARKER, '');
-	const rendered = renderSource(cleanBody);
-	const excerpt = excerptSource || makeExcerpt(rendered);
+	// `<!--more-->` 摘要分界（Typecho 惯例）：分界以哨兵留在 rendered 里（两半各自渲染，HTML 平衡），
+	// body 保留标记原文；`excerpt` 列只存手写摘要 —— Typecho 库里没有独立摘要字段，恒为空
+	const { body: cleanBody, beforeMore } = splitMoreMarker(source);
+	const rendered = beforeMore
+		? `${renderSource(beforeMore)}${MORE_SENTINEL}${renderSource(cleanBody)}`
+		: renderSource(cleanBody);
 
 	// 附件：Typecho 把元信息塞在 text 里的 JSON
 	let mime: string | null = null;
@@ -453,9 +451,9 @@ function buildContentRow(
 		slug,
 		created: Number(row.created ?? 0),
 		modified: Number(row.modified ?? 0),
-		body: cleanBody,
+		body: source,
 		rendered: isAttachment ? '' : rendered,
-		excerpt: isAttachment ? '' : excerpt,
+		excerpt: '',
 		sort_order: Number(row.order ?? 0),
 		author_id: Number(row.authorId ?? 1),
 		type,

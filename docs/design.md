@@ -162,6 +162,8 @@ Cloudflare 的 URL Rewrite **不能改写 hostname**（只能改 path 和 query�
 | --------------- | --------------------------- |
 | `/admin/login`  | 登录（带 Turnstile）             |
 | `/admin/*`      | 写作、内容管理、设置                  |
+| `/admin/preview` | 编辑器预览（textarea 当前内容 → 服务端渲染成 HTML 片段；只在作者手动切 tab 时触发，是「渲染不进请求路径」在后台的**故意例外**） |
+| `/admin/media/upload` | 编辑器快速传图（单文件 JSON 端点，与媒体库同一套 §9 校验，前端把 `![](url)` 插到光标处） |
 | `/preview/:cid` | 草稿预览（未发布的文章不存在于 R2，只能在这里渲染） |
 
 **代价要说清楚**：
@@ -185,7 +187,7 @@ Cloudflare 的 URL Rewrite **不能改写 hostname**（只能改 path 和 query�
 | KV       | 仅存登录失败计数                      | 写额度太紧（1000 写/天），不缓存、也不存配置（配置走 isolate 内存 + Cache API，见 §7.3） |
 | 前台主题模板   | **原生模板字符串 / tagged template** | 固定主题，不需要模板引擎。渲染只在发布时发生，不进请求路径 |
 | 后台页面渲染   | **Hono JSX**（`hono/jsx`）         | 后台表单多。JSX 会**自动转义子节点**，并在序列化时校验标签名与属性名（额外一层防注入），避免手写 `escapeHtml()` 漏一处就成 XSS（§8.3）。编译期完成语法转换，运行时把 JSX 树序列化成字符串，开销可忽略 |
-| Markdown | **markdown-it**（写入时用）         | 插件生态好；只在保存文章时执行                                              |
+| Markdown | **markdown-it**（写入时用）         | 插件生态好；只在保存文章时执行（后台编辑器的 `/admin/preview` 预览端点是唯一例外，见 §2 路由表注） |
 | HTML 清洗  | **自身白名单 + sanitize**          | 防后台 XSS                                                      |
 | 密码       | **PBKDF2-SHA256（WebCrypto）**  | Workers 无原生 bcrypt/argon2                                    |
 | 验证码      | **Turnstile**                 | 免费，后台登录防爆破                                                   |
@@ -538,8 +540,9 @@ SELECT c.cid, c.title, c.slug, c.created, c.modified, c.body, c.rendered, c.exce
 Worker
    ├─ 1. Markdown → HTML（markdown-it）
    ├─ 2. XSS 清洗（白名单）
-   ├─ 3. 生成摘要、统计字数（excerpt 存 Markdown 原文：作者自定义 > `<!--more-->` 前半段
-   │     > 自动截前 200 字；列表页渲染时再转 HTML，Feed 剥回纯文本）
+   ├─ 3. 渲染正文、统计字数（`excerpt` 列**只存作者手写的摘要**，没写就留空，不自动生成；
+   │     `<!--more-->` 分界以哨兵留在 rendered 里，列表页渲染时由 summaryView 现算：
+   │     手写摘要 > 分界前半段 > 全文，全文时不显示「阅读剩余部分」）
    ├─ 4. 写入 D1：contents（body 原文 + rendered 片段 + excerpt + words）
    ├─ 5. 用模板把 rendered 套进完整页面骨架
    ├─ 6. 批量写入 R2（对象清单见 §5.3）

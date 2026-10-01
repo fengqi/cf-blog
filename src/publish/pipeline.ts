@@ -20,7 +20,7 @@
  */
 
 import { createDb } from '../lib/db';
-import { countWords, extractText, makeExcerpt, renderMarkdown, splitMoreMarker } from '../lib/markdown';
+import { countWords, extractText, renderBodyWithMore, splitMoreMarker } from '../lib/markdown';
 import { deleteKeys, writeObjects } from '../lib/r2';
 import type { WriteOutcome } from '../lib/r2';
 import { standalonePagePath, postPath } from '../lib/url';
@@ -87,17 +87,13 @@ export async function renderAndSaveBody(
 	const source = await getContentBody(db, cid);
 	if (!source) throw new Error(`cid=${cid} 不存在`);
 
-	// `<!--more-->` 摘要分界（Typecho 惯例）：标记前的部分作摘要，标记本身不进正文
+	// `<!--more-->` 摘要分界（Typecho 惯例）：分界以哨兵形式留在 rendered 里（两半各自渲染），
+	// `excerpt` 列**只存作者手写的摘要**，没写就留空 —— 不自动生成落库，
+	// 列表页渲染时由 summaryView 现算（手写 > 分界前半段 > 全文）
 	const { body, beforeMore } = splitMoreMarker(source.body);
-	const rendered = renderMarkdown(body);
-	const text = extractText(rendered);
-	// 摘要**存 Markdown 原文**，列表页渲染时再转 HTML（render.ts）。
-	// 优先级：作者自定义摘要 > `<!--more-->` 前半段 > 自动截前 200 字（纯文本）。
-	const excerpt =
-		(source.excerpt ?? '').trim() ||
-		beforeMore ||
-		makeExcerpt(rendered);
-	const words = countWords(text);
+	const rendered = renderBodyWithMore(beforeMore, body);
+	const excerpt = (source.excerpt ?? '').trim();
+	const words = countWords(extractText(rendered));
 
 	await saveRendered(db, cid, { rendered, excerpt, words });
 	return { rendered, excerpt, words };
@@ -353,8 +349,9 @@ export async function renderPreview(env: PublishEnv, cid: number): Promise<{ htm
 	const post = await getContentByCid(db, cid);
 	if (!post) throw new Error(`cid=${cid} 读不到`);
 
-	// 只读路径：渲染结果只存在内存里
-	post.html = renderMarkdown(source.body);
+	// 只读路径：渲染结果只存在内存里（分界哨兵照常留在 HTML 里，与发布后的正文一致）
+	const { body, beforeMore } = splitMoreMarker(source.body);
+	post.html = renderBodyWithMore(beforeMore, body);
 
 	const { snapshot } = await loadSnapshot(env, 'preview');
 	const target: Target =

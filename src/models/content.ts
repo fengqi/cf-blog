@@ -4,8 +4,8 @@
  * 三条纪律：
  *  1. **分类与标签必须用 `json_group_array` 在同一条 SQL 里聚合**（§1.4 铁律 4），
  *     绝不允许「查文章 → 循环查分类」这种 N+1。
- *  2. 列表查询**不回捞 `rendered`** —— 摘要落库（`excerpt`）就是为了这个，
- *     一次发布不用把几百 KB 正文从 D1 拉过来。
+ *  2. 列表查询回捞 `rendered`：摘要不再落库派生值（`excerpt` 只存手写摘要，没写就空），
+ *     「分界前半段 / 全文」都要靠 rendered 现算。
  *  3. 写入只在这里出现，`routes/` 与 `theme/` 不碰数据库。
  */
 
@@ -635,11 +635,14 @@ export interface AttachmentInput {
 /** 附件落库：needs_sync = 0 —— 附件不进内容渲染流水线，文件本体在上传时直接写 R2 */
 export async function createAttachment(db: Db, input: AttachmentInput): Promise<number> {
 	const now = Math.floor(Date.now() / 1000);
+	// slug 对附件没有路由语义（公开 URL 由 r2_key 决定），但表上有 UNIQUE(type, slug)：
+	// 之前写秒级时间戳，同一秒传第二个附件必撞唯一约束（媒体库一次多选、
+	// 编辑器连发传图都会触发），这里用随机 id 兜住唯一性。
 	const result = await db.run(
 		`INSERT INTO contents (title, slug, created, modified, body, rendered, excerpt, sort_order,
 		                       author_id, type, status, allow_feed, parent, words, mime, size, r2_key, needs_sync)
 		 VALUES (?, ?, ?, ?, '', '', NULL, 0, ?, 'attachment', 'publish', 0, 0, 0, ?, ?, ?, 0)`,
-		[input.title, String(now), now, now, input.authorId, input.mime, input.size, input.r2Key],
+		[input.title, crypto.randomUUID(), now, now, input.authorId, input.mime, input.size, input.r2Key],
 	);
 	return Number(result.meta.last_row_id);
 }

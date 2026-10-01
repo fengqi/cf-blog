@@ -433,7 +433,7 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	const row = await all<{ excerpt: string; words: number; needs_sync: number }>(
 		'SELECT excerpt, words, needs_sync FROM contents WHERE cid = 100',
 	);
-	check('摘要落库且是纯文本', row[0].excerpt.length > 0 && !row[0].excerpt.includes('<'), row[0].excerpt.slice(0, 24));
+	check('未写摘要时 excerpt 留空（不再自动生成）', row[0].excerpt === '', row[0].excerpt.slice(0, 24));
 	check('字数已统计', row[0].words > 0, String(row[0].words));
 	check('写成功 → needs_sync = 0', row[0].needs_sync === 0);
 
@@ -501,7 +501,11 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	const waitingHtml = (await (await env.BUCKET.get('default/post-12.html'))?.text()) ?? '';
 	check('定时文章的正文已补渲染（不是空壳）', waitingHtml.includes('未来的文章'), waitingHtml.length > 0 ? `页面 ${waitingHtml.length} 字节` : '页面为空');
 	const waitingRow = await all<{ rendered: string; excerpt: string }>('SELECT rendered, excerpt FROM contents WHERE cid = 111');
-	check('rendered 已回填 D1', waitingRow[0].rendered.includes('未来的文章') && waitingRow[0].excerpt.length > 0, waitingRow[0].excerpt.slice(0, 20));
+	check(
+		'rendered 已回填 D1（excerpt 保持留空）',
+		waitingRow[0].rendered.includes('未来的文章') && waitingRow[0].excerpt === '',
+		waitingRow[0].excerpt.slice(0, 20),
+	);
 
 	// -----------------------------------------------------------------------
 	// 6b. 脏的**独立页面**也要能对账（页面没有分类，不能照抄文章的目标计算）
@@ -718,7 +722,7 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('新页面正文来自表单且已清洗', renamedHtml.includes('表单发布的内容') && !renamedHtml.includes('<script>alert(7)'));
 	check('新页面显示了新标签', renamedHtml.includes('表单标签'));
 	const excerptRow = await all<{ excerpt: string }>('SELECT excerpt FROM contents WHERE cid = 101');
-	check('自动摘要已生成并落库', excerptRow[0].excerpt.includes('新标题') && !excerptRow[0].excerpt.includes('<'), excerptRow[0].excerpt.slice(0, 20));
+	check('未写摘要时 excerpt 留空（不再自动生成）', excerptRow[0].excerpt === '', excerptRow[0].excerpt.slice(0, 20));
 	const retiredHtml = (await (await env.BUCKET.get('default/post-2.html'))?.text()) ?? '';
 	const retiredCanonical = /<link rel="canonical" href="([^"]+)"/.exec(retiredHtml)?.[1];
 	check('旧 URL 的 canonical 指向新地址', retiredCanonical === 'https://blog.fengqi.me/default/renamed-post.html', String(retiredCanonical));
@@ -894,7 +898,7 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('删除分类返回 303', catDelete.status === 303);
 	check('主分类顺延后新地址已写出', (await env.BUCKET.get('spare-cat/cat-post.html')) !== null);
 
-	// `<!--more-->` 摘要分界（Typecho 惯例）：标记前半段落为摘要，标记不进正文
+	// `<!--more-->` 摘要分界（Typecho 惯例）：分界以哨兵留在 rendered，excerpt 保持留空
 	const moreForm = await postForm(
 		'/admin/posts',
 		{
@@ -914,23 +918,68 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 		"SELECT excerpt, rendered FROM contents WHERE slug = 'more-marker'",
 	);
 	check(
-		'`<!--more-->` 前半段落为摘要',
-		moreForm.status === 303 && moreRow[0]?.excerpt === '这是标记前的摘要部分。',
+		'`<!--more-->` 分界：excerpt 留空（不自动生成）',
+		moreForm.status === 303 && moreRow[0]?.excerpt === '',
 		moreRow[0]?.excerpt,
 	);
 	check(
-		'摘要标记不进正文渲染',
-		!(moreRow[0]?.rendered ?? '').includes('<!--more-->') && (moreRow[0]?.rendered ?? '').includes('标记后的正文'),
+		'分界哨兵进 rendered（两半各自渲染，HTML 平衡）',
+		/<p>这是标记前的摘要部分。<\/p>\s*<!--more-->\s*<p>这是标记后的正文。<\/p>/.test(moreRow[0]?.rendered ?? ''),
+		moreRow[0]?.rendered,
 	);
 	const moreObj = await env.BUCKET.get('default/more-marker.html');
 	const moreHtml = await moreObj?.text() ?? '';
-	check('文章页用 more 标记前的摘要', moreHtml.includes('这是标记前的摘要部分。'));
+	check('文章页正文完整（分界两半都在）', moreHtml.includes('这是标记前的摘要部分。') && moreHtml.includes('这是标记后的正文。'));
+
+	// 手写摘要：用作者写的那份（支持 Markdown），照样显示「阅读剩余部分」
+	const manualForm = await postForm(
+		'/admin/posts',
+		{
+			title: '手写摘要测试',
+			slug: 'manual-excerpt',
+			type: 'post',
+			status: 'publish',
+			created: '2026-10-01T00:00',
+			body: '正文里没有摘要分界。',
+			excerpt: '**手写**的 *Markdown* 摘要。',
+			allow_feed: '1',
+		},
+		cookie2,
+	);
+	await Promise.allSettled(waits.splice(0));
+	const manualRow = await all<{ excerpt: string; rendered: string }>(
+		"SELECT excerpt, rendered FROM contents WHERE slug = 'manual-excerpt'",
+	);
+	check(
+		'手写摘要原文落库（Markdown 不动）且不混进正文',
+		manualForm.status === 303 &&
+			manualRow[0]?.excerpt === '**手写**的 *Markdown* 摘要。' &&
+			!(manualRow[0]?.rendered ?? '').includes('手写'),
+		manualRow[0]?.excerpt,
+	);
+
 	const homeObj = await env.BUCKET.get('');
 	const homeExcerptHtml = await homeObj?.text() ?? '';
 	check(
-		'首页摘要按 Markdown 渲染成 HTML',
+		'首页 `<!--more-->` 项用分界前半段作摘要',
 		homeExcerptHtml.includes('<div class="post-excerpt"><p>这是标记前的摘要部分。</p>'),
 		`hasDiv=${homeExcerptHtml.includes('post-excerpt')} hasText=${homeExcerptHtml.includes('这是标记前的摘要部分。')}`,
+	);
+	// 逐项检查列表项：有没有摘要、有没有「阅读剩余部分」
+	const homeItems = homeExcerptHtml.split('<li class="post-item">').slice(1);
+	const itemBlock = (needle: string): string => {
+		const item = homeItems.find((entry) => entry.includes(needle)) ?? '';
+		const end = item.indexOf('</li>');
+		return end < 0 ? item : item.slice(0, end);
+	};
+	check('`<!--more-->` 分界的列表项显示「阅读剩余部分」', itemBlock('摘要分界测试').includes('post-more'));
+	check(
+		'手写摘要项按 Markdown 渲染且显示「阅读剩余部分」',
+		itemBlock('手写摘要测试').includes('<strong>手写</strong>') && itemBlock('手写摘要测试').includes('post-more'),
+	);
+	check(
+		'全文当摘要的列表项不显示「阅读剩余部分」',
+		itemBlock('没勾分类的文章').includes('没勾分类的文章') && !itemBlock('没勾分类的文章').includes('post-more'),
 	);
 
 	// 改口令（⑤）：错误当前口令 / 两次不一致 / 成功后旧会话全失效

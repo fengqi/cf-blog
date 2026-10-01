@@ -52,7 +52,7 @@ CREATE TABLE contents (
   modified       INTEGER NOT NULL,
   body           TEXT    NOT NULL DEFAULT '',   -- Markdown 原文（编辑用）
   rendered       TEXT    NOT NULL DEFAULT '',   -- 预渲染 HTML（前台直接输出，关键字段）
-  excerpt        TEXT,                          -- 自定义摘要；为空则用 rendered 截断
+  excerpt        TEXT,                          -- 作者手写的摘要（Markdown 原文）；没写就留空，不自动生成
   sort_order     INTEGER NOT NULL DEFAULT 0,    -- 独立页面排序
   author_id      INTEGER NOT NULL,
   template       TEXT,                          -- 预留：自定义页面模板名

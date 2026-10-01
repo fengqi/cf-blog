@@ -37,8 +37,8 @@ export interface PostRecord {
 	/** 已清洗的正文 HTML（§8.3） */
 	html: string;
 	/**
-	 * 摘要 **Markdown 原文**（列表页渲染时经 renderMarkdown 转成 HTML）。
-	 * 来源优先级：作者自定义摘要 > `<!--more-->` 前半段 > 自动截前 200 字。
+	 * 摘要 **Markdown 原文**，**只存作者在编辑器里手写的那份**（没写就留空，不自动生成落库）。
+	 * 列表页渲染时由 `summaryView` 现算：手写摘要 > `<!--more-->` 分界前半段 > 全文。
 	 */
 	excerpt: string;
 	words?: number;

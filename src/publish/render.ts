@@ -20,7 +20,7 @@ import { renderOverview } from '../../theme/overview';
 import type { OverviewItem, OverviewLayout } from '../../theme/overview';
 import { renderPost } from '../../theme/post';
 import type { TermLink } from '../../theme/post';
-import { makeExcerpt, renderMarkdown } from '../lib/markdown';
+import { makeExcerpt, summaryView } from '../lib/markdown';
 import { HTML_CONTENT_TYPE } from '../lib/r2';
 import type { RenderedObject } from '../lib/r2';
 import { formatDateOnly, formatRfc822, monthOf } from '../lib/time';
@@ -71,12 +71,14 @@ function articlePath(post: PostRecord): string {
 }
 
 function toListPost(post: PostRecord): ListPost {
+	// 摘要在渲染期现算：手写摘要（Markdown）> `<!--more-->` 分界前半段 > 全文（无「阅读剩余部分」）
+	const summary = summaryView(post);
 	return {
 		title: post.title,
 		url: articlePath(post),
 		created: post.created,
-		// 摘要存的是 Markdown 原文，这里转成（已清洗的）HTML 给主题原样输出
-		excerptHtml: post.excerpt ? renderMarkdown(post.excerpt) : '',
+		excerptHtml: summary.excerptHtml,
+		hasMore: summary.hasMore,
 		categories: toTermLinks(post.categories),
 	};
 }
@@ -376,7 +378,7 @@ function renderFeed(snapshot: SiteSnapshot): string {
 		<link>${xmlEscape(link)}</link>
 		<guid isPermaLink="true">${xmlEscape(link)}</guid>
 		<pubDate>${formatRfc822(post.created)}</pubDate>
-		<description>${xmlEscape(makeExcerpt(renderMarkdown(post.excerpt)))}</description>
+		<description>${xmlEscape(makeExcerpt(summaryView(post).excerptHtml))}</description>
 		<content:encoded>${cdata(post.html)}</content:encoded>
 	</item>`;
 		})

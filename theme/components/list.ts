@@ -20,6 +20,8 @@ export interface ListPost {
 	created: number;
 	/** **已渲染的摘要 HTML**（发布流水线已按 Markdown 渲染并白名单清洗），原样输出 */
 	excerptHtml?: string;
+	/** 摘要是不是只是正文的一部分（手写节选或 `<!--more-->` 前半段）；全文当摘要时不显示「阅读剩余部分」 */
+	hasMore?: boolean;
 	categories?: TermLink[];
 }
 
@@ -38,8 +40,7 @@ export function renderPostItem(post: ListPost, site: SiteInfo): string {
 			<h2 class="post-item-title"><a href="${escapeHtml(post.url)}">${escapeHtml(post.title)}</a></h2>
 			<p class="post-meta">
 				${meta.join('\n\t\t\t\t')}
-			</p>${post.excerptHtml ? `\n\t\t\t<div class="post-excerpt">${post.excerptHtml}</div>` : ''}
-			<p class="post-more"><a href="${escapeHtml(post.url)}" title="${escapeHtml(post.title)}">阅读剩余部分</a></p>
+			</p>${post.excerptHtml ? `\n\t\t\t<div class="post-excerpt">${post.excerptHtml}</div>` : ''}${post.hasMore ? `\n\t\t\t<p class="post-more"><a href="${escapeHtml(post.url)}" title="${escapeHtml(post.title)}">阅读剩余部分</a></p>` : ''}
 		</li>`;
 }
 

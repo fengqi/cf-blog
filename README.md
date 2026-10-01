@@ -207,7 +207,13 @@ wrangler secret put TURNSTILE_SECRET
   打指纹后作为**独立对象**写进 R2，页面里只留一个 `<link>` / `<script>`（design.md §7.2）
 - **`src/views/`（`.tsx`）**：后台页面，Hono JSX，直接当 HTTP 响应返回
 
-不要互相串用。后台 JSX 另有两条规定：只 import `hono/jsx`（不用 `hono/jsx/dom`）；唯一的转义出口 `dangerouslySetInnerHTML` 只允许用在文章正文。
+不要互相串用。后台 JSX 另有三条规定：
+
+1. 只 import `hono/jsx`（不用 `hono/jsx/dom`）；
+2. 唯一的转义出口 `dangerouslySetInnerHTML` 只允许用在文章正文；
+3. 每个后台页面的第一行必须是 `<h1 class="page-head">`（页面标题，全宽靠左，条数/页次挂右侧 `.note`）。
+   这条不是为了好看 —— 各页首元素一旦该是按钮行、该是带内联 margin 的 h2、该是表单 label，
+   切页时整块内容就会上下跳。
 
 ## 导航与版式（速查）
 

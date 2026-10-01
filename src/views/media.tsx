@@ -39,10 +39,15 @@ export function MediaLibraryPage(props: MediaLibraryPageProps) {
 			message={props.message}
 			error={props.error}
 		>
-			<h2 style="font-size:1rem;margin:1.5rem 0 .5rem">
-				已上传（{props.total}
-				{props.totalPages > 1 ? ` · 第 ${props.page} / ${props.totalPages} 页` : ''}）
-			</h2>
+			<h1 class="page-head">
+				媒体库
+				{/* 条数/页次挂标题右侧：原来它自己占一行 h2，还带 1.5rem 上边距，
+				    导致本页第一行比别的页低一截（切页时内容上下跳） */}
+				<span class="note">
+					已上传 {props.total}
+					{props.totalPages > 1 ? ` · 第 ${props.page} / ${props.totalPages} 页` : ''}
+				</span>
+			</h1>
 			<table>
 				<thead>
 					<tr>

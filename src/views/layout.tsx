@@ -83,6 +83,26 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 h1 { margin: 0 0 1.25rem; font-size: 1.375rem; line-height: 1.4; font-weight: 700; letter-spacing: -0.01em; }
 h2 { margin: 1.75rem 0 0.6rem; font-size: 1.0625rem; font-weight: 650; }
 
+/* --- 页面标题：后台每页第一行都是它（全宽靠左、字号行高一档） ---
+   以前各页首元素各不相同（按钮行 / 带内联 margin 的 h2 / form.stack 的 label），
+   左右或上下错开，切页时整块内容看着一会儿靠上一会儿靠下。
+   现在统一：每个 view 都以 <h1 class="page-head"> 开头，标题同高，
+   下面的内容自然就有同一个起点。note 是右侧的辅助信息（条数、页次）。 */
+.page-head {
+	display: flex;
+	align-items: baseline;
+	gap: 0.75rem;
+	margin: 0 0 1.25rem;
+}
+.page-head .note {
+	margin-left: auto;
+	font-size: 0.8125rem;
+	font-weight: 400;
+	letter-spacing: 0;
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
 /* --- 页头：内容与 main 的 62rem 容器对齐，宽屏上导航不贴屏幕左边缘 --- */
 
 header.top { border-bottom: 1px solid var(--border); background: var(--bg); }

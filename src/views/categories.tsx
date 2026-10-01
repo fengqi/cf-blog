@@ -27,6 +27,7 @@ export function CategoriesPage(props: CategoriesPageProps) {
 			message={props.message}
 			error={props.error}
 		>
+			<h1 class="page-head">分类</h1>
 			<form method="post" action="/admin/categories" class="stack">
 				<div class="row">
 					<div>
@@ -48,7 +49,7 @@ export function CategoriesPage(props: CategoriesPageProps) {
 			</form>
 
 			<div class="stack-block">
-				<h2 style="font-size:1rem;margin:1.5rem 0 .5rem">全部分类（{props.categories.length}）</h2>
+				<h2>全部分类（{props.categories.length}）</h2>
 				{/* 表单放在表格外面，单元格里的控件用 form 属性挂接 —— HTML 不允许 form 包 tr */}
 				{props.categories.map((term) => (
 					<form

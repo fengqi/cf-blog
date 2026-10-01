@@ -22,6 +22,7 @@ export function ChangePasswordPage(props: ChangePasswordPageProps) {
 			message={props.message}
 			error={props.error}
 		>
+			<h1 class="page-head">改口令</h1>
 			<form method="post" action="/admin/password" class="stack">
 				<div>
 					<label for="current_password">当前口令</label>

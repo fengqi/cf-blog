@@ -430,6 +430,7 @@ export function PostEditorPage(props: PostEditorPageProps) {
 			message={props.message}
 			error={props.error}
 		>
+			<h1 class="page-head">{isNew ? '写文章' : '编辑文章'}</h1>
 			<form method="post" action={action} class="editor-grid">
 				{/* ---------------- 左栏：内容 ---------------- */}
 				<div class="editor-main">

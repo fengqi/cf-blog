@@ -32,6 +32,7 @@ export function SettingsPage(props: SettingsPageProps) {
 	const v = props.values;
 	return (
 		<AdminLayout title="站点设置 · 博客后台" user={props.user} message={props.message} error={props.error}>
+			<h1 class="page-head">站点设置</h1>
 			<form method="post" action="/admin/settings" class="stack">
 				<div>
 					<label for="site_title">站点标题</label>

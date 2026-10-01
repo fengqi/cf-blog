@@ -1017,7 +1017,7 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('媒体库第二页是剩下的', rowsOn(mediaPage2) === attTotal - 10, `${rowsOn(mediaPage2)} / 共 ${attTotal}`);
 	check(
 		'标题显示总数与页码',
-		mediaPage1.includes(`已上传（${attTotal} · 第 1 / ${attPages} 页）`),
+		mediaPage1.includes(`已上传 ${attTotal}`) && mediaPage1.includes(`第 1 / ${attPages} 页`),
 		`共 ${attTotal} 页 ${attPages}`,
 	);
 	const pageOverHtml = await (await call('/admin/media?page=99', { headers: { cookie: cookie2 } })).text();

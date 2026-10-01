@@ -49,6 +49,12 @@ export function PostListPage(props: PostListPageProps) {
 	};
 	return (
 		<AdminLayout title="文章 · 博客后台" user={props.user} message={props.message} error={props.error}>
+			{/* 页面标题的位置/字号全后台统一；条数挂到标题右侧 ——
+			    原来没有标题，条数挤在下面的按钮行里，本页第一行因此比别的页低一截 */}
+			<h1 class="page-head">
+				文章
+				<span class="note">{hasFilter ? `筛出 ${props.total} 条` : `共 ${props.total} 条`}</span>
+			</h1>
 			<div class="actions" style="margin-bottom:1rem">
 				<a class="button" href="/admin/posts/new">
 					写文章
@@ -62,9 +68,6 @@ export function PostListPage(props: PostListPageProps) {
 							待同步 {props.needsSync}
 						</a>
 					) : null}
-				</span>
-				<span class="hint">
-					{hasFilter ? `筛出 ${props.total} 条` : `共 ${props.total} 条`}
 				</span>
 			</div>
 

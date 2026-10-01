@@ -49,29 +49,30 @@ export function PostListPage(props: PostListPageProps) {
 	};
 	return (
 		<AdminLayout title="文章 · 博客后台" user={props.user} message={props.message} error={props.error}>
-			{/* 页面标题的位置/字号全后台统一；条数挂到标题右侧 ——
-			    原来没有标题，条数挤在下面的按钮行里，本页第一行因此比别的页低一截 */}
+			{/* 页面标题的位置/字号全后台统一；条数与「待同步」挂到标题右侧 ——
+			    原来没有标题，它们挤在下面的按钮行里，本页第一行因此比别的页低一截。
+			    「待同步」留在标题行：它是站点级状态提醒，不是筛选条件 */}
 			<h1 class="page-head">
 				文章
-				<span class="note">{hasFilter ? `筛出 ${props.total} 条` : `共 ${props.total} 条`}</span>
-			</h1>
-			<div class="actions" style="margin-bottom:1rem">
-				<a class="button" href="/admin/posts/new">
-					写文章
-				</a>
-				<a class="button" href="/admin/render">
-					渲染维护
-				</a>
-				<span class="hint">
+				<span class="note">
+					{hasFilter ? `筛出 ${props.total} 条` : `共 ${props.total} 条`}
 					{props.needsSync > 0 ? (
 						<a class="badge dirty" href="/admin/render">
 							待同步 {props.needsSync}
 						</a>
 					) : null}
 				</span>
-			</div>
+			</h1>
 
+			{/* 一行排开：主操作在左，筛选条件跟在后面（原来主操作独占一行，
+			    搜索框又 flex-grow 撑满剩下的宽度，整行又空又长） */}
 			<form method="get" action="/admin" class="filter-bar">
+				<a class="button" href="/admin/posts/new">
+					写文章
+				</a>
+				<a class="button" href="/admin/render">
+					渲染维护
+				</a>
 				<input type="text" name="q" placeholder="标题 / 缩略名" value={props.filters.q ?? ''} />
 				<select name="status" aria-label="按状态筛选">
 					<option value="">全部状态</option>

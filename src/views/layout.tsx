@@ -94,7 +94,11 @@ h2 { margin: 1.75rem 0 0.6rem; font-size: 1.0625rem; font-weight: 650; }
 	gap: 0.75rem;
 	margin: 0 0 1.25rem;
 }
+/* note 里可能不止一样东西（条数 + 待同步徽标），自己也是基线对齐的横排 */
 .page-head .note {
+	display: flex;
+	align-items: baseline;
+	gap: 0.5rem;
 	margin-left: auto;
 	font-size: 0.8125rem;
 	font-weight: 400;
@@ -288,11 +292,15 @@ button.danger:hover, a.button.danger:hover {
 	flex-wrap: wrap;
 	margin: 0 0 1rem;
 }
-.filter-bar input[type=text] { flex: 1 1 12rem; width: auto; min-width: 6rem; }
+/* 搜索框不 flex-grow：撑满剩下的宽度只会让整行又空又长。
+   定 14rem、允许挤到 7rem，挤不动了就让整条 wrap */
+.filter-bar input[type=text] { flex: 0 1 14rem; width: auto; min-width: 7rem; }
 /* select 绝不收缩：flex-shrink 会把它压得比内容窄，原生下拉箭头压到文字、
    挤到旁边的按钮上；空间不够时让整条 wrap（.filter-bar 本身 flex-wrap: wrap） */
 .filter-bar select { flex: 0 0 auto; width: auto; }
 .filter-bar button, .filter-bar a.button { padding: 0.35rem 0.8rem; font-weight: 400; }
+/* 行内的链接按钮（写文章/渲染维护/清除）同样不许收缩 —— 收缩会把文字换行 */
+.filter-bar a.button { flex: 0 0 auto; white-space: nowrap; }
 
 /* 渲染维护页：两块独立操作 */
 .render-block {

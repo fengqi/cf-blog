@@ -165,8 +165,9 @@ jsxImportSource，会报 `React is not defined`），写到 `/tmp` 再用 Chrome
 
 1. **给元素设了 `display` 的类会盖掉 `hidden` 属性**（`.side-pane { display: grid }` 中过招：
    切 tab 两个面板同时可见）。STYLE 里已加全局 `[hidden] { display: none !important; }`。
-2. **CSS 注释里不能出现反引号** —— 会把模板字符串截断，esbuild 报
-   `Expected ";" but found "hidden"`（错误信息指向的行号在字符串内部，很难一眼看穿）。
+2. **CSS 注释里不能出现反引号** —— 会把模板字符串截断。**已踩两次**（第二次报的是
+   `"... .stack is not a function`，workerd 直接起不来）。给 layout.tsx 写 CSS 注释，
+   一个反引号都不许有 —— 想引用类名就用 `form.stack` 这种不带引号的写法。
 
 ## 无头浏览器视觉验收（本机可用）
 

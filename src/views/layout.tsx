@@ -332,29 +332,26 @@ form.stack .actions button[type=submit]:hover {
 .side-pane { padding: 0.9rem 1rem; display: grid; gap: 0.9rem; }
 .side-field > label:first-child { margin-bottom: 0.3rem; }
 .side-field .hint { margin: 0.3rem 0 0; }
-.side-actions {
-	display: flex;
-	gap: 0.5rem;
-	flex-wrap: wrap;
-	align-items: center;
-	padding-top: 0.6rem;
+/* 左栏底部的操作行（保存/预览/返回）：主提交实心。
+   上面 form.stack 那条规则管不到这里（编辑器的 form 是 editor-grid），所以补一条 */
+.editor-main .actions {
+	justify-content: flex-end;
+	padding-top: 1rem;
 	border-top: 1px solid var(--border);
 }
-.side-actions button, .side-actions a.button { padding: 0.35rem 0.8rem; font-weight: 400; }
-/* 右栏里的主提交也实心（.stack 那条规则只管 form.stack，这里补一条） */
-.editor-side .side-actions button[type=submit] {
+.editor-main .actions button[type=submit] {
 	background: var(--accent);
 	border-color: var(--accent);
 	color: #ffffff;
 }
-.editor-side .side-actions button[type=submit]:hover {
+.editor-main .actions button[type=submit]:hover {
 	background: var(--accent-hover);
 	border-color: var(--accent-hover);
 	color: #ffffff;
 }
 @media (prefers-color-scheme: dark) {
-	.editor-side .side-actions button[type=submit] { color: #0b1c33; }
-	.editor-side .side-actions button[type=submit]:hover { color: #0b1c33; }
+	.editor-main .actions button[type=submit] { color: #0b1c33; }
+	.editor-main .actions button[type=submit]:hover { color: #0b1c33; }
 }
 
 /* 附件 tab：上传区 + 文件列表（点文件名插入，点删除删附件） */

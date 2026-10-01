@@ -708,6 +708,12 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 			editHtml.includes('id="upload-area"') &&
 			editHtml.includes('id="file-list"'),
 	);
+	// 用按钮文案定位（type="submit" 会先匹配到页头的「退出」按钮）
+	check(
+		'保存/预览按钮在左栏底部（切到「附件」tab 也不会消失）',
+		editHtml.indexOf('保存并发布') > editHtml.indexOf('class="editor-main"') &&
+			editHtml.indexOf('保存并发布') < editHtml.indexOf('id="side-files"'),
+	);
 	check(
 		'分类/状态/标签挪到右栏（与 Typecho write-post 同款）',
 		editHtml.includes('id="side-options"') &&

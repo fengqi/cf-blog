@@ -516,6 +516,21 @@ export function PostEditorPage(props: PostEditorPageProps) {
 							<code>&lt;!--more--&gt;</code> 前的部分（Typecho 惯例），也没有就整篇当摘要
 						</p>
 					</div>
+
+					{/* 操作按钮在**左栏底部**（Typecho 的 .submit 同款位置）——
+					    放右栏的话，切到「附件」tab 就看不见保存了 */}
+					{/* 靠右排（Typecho 的 .submit 同款）：次要操作在左，主操作在最右 */}
+					<div class="actions">
+						<a class="button" href="/admin">
+							返回列表
+						</a>
+						{post ? (
+							<a class="button" href={`/preview/${post.cid}`} target="_blank">
+								预览
+							</a>
+						) : null}
+						<button type="submit">{isNew ? '保存' : '保存并发布'}</button>
+					</div>
 				</div>
 
 				{/* ---------------- 右栏：选项 / 附件 ---------------- */}
@@ -612,18 +627,6 @@ export function PostEditorPage(props: PostEditorPageProps) {
 								/>{' '}
 								允许进入 RSS
 							</label>
-						</div>
-
-						<div class="side-actions">
-							<button type="submit">{isNew ? '保存' : '保存并发布'}</button>
-							{post ? (
-								<a class="button" href={`/preview/${post.cid}`} target="_blank">
-									预览
-								</a>
-							) : null}
-							<a class="button" href="/admin">
-								返回列表
-							</a>
 						</div>
 					</div>
 

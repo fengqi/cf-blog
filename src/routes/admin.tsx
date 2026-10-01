@@ -39,6 +39,7 @@ import {
 	deleteCategory,
 	ensureTags,
 	findCategoryBySlug,
+	listTermChoices,
 	listTerms,
 	updateCategory,
 } from '../models/meta';
@@ -147,7 +148,7 @@ adminRoutes.get('/admin', async (c) => {
 		listAdminPosts(db, pageSize, filter, (page - 1) * pageSize),
 		countAdminPosts(db, filter),
 		countNeedsSync(db),
-		listTerms(db, 'category'),
+		listTermChoices(db, 'category'), // 筛选下拉：只要 mid/name，不付实时 COUNT
 	]);
 	const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -651,7 +652,7 @@ adminRoutes.post('/admin/categories/:mid/delete', async (c) => {
 adminRoutes.get('/admin/posts/new', async (c) => {
 	const db = createDb(c.env.DB, 'admin');
 	const options = await getSiteOptions(c.env);
-	const categories = await listTerms(db, 'category');
+	const categories = await listTermChoices(db, 'category');
 
 	return c.html(
 		<PostEditorPage
@@ -672,7 +673,7 @@ adminRoutes.get('/admin/posts/:cid/edit', async (c) => {
 	const options = await getSiteOptions(c.env);
 	const [post, categories, attachments] = await Promise.all([
 		getEditorView(db, cid),
-		listTerms(db, 'category'),
+		listTermChoices(db, 'category'),
 		listAttachmentsByParent(db, cid), // 右侧「附件」tab 的初始清单
 	]);
 	if (!post) return c.notFound();
@@ -705,7 +706,7 @@ adminRoutes.post('/admin/posts', async (c) => {
 		// 否则 permalink 是 /<category>/<slug>.html，缺分类根本拼不出 URL（§4.3）
 		const categoryIds = payload.categoryIds.length > 0 ? payload.categoryIds : [];
 		if (payload.input.type === 'post' && categoryIds.length === 0) {
-			const fallback = await listTerms(db, 'category');
+			const fallback = await listTermChoices(db, 'category');
 			if (fallback.length === 0) {
 				return c.redirect('/admin/posts/new?error=' + encodeURIComponent('没有任何分类，无法确定文章 URL'), 303);
 			}
@@ -749,7 +750,7 @@ adminRoutes.post('/admin/posts/:cid', async (c) => {
 		// 同新建：文章不能没有分类，空着就沿用原有的，仍为空则回落到第一个分类
 		let categoryIds = payload.categoryIds.length > 0 ? payload.categoryIds : (existingView?.categoryIds ?? []);
 		if (payload.input.type === 'post' && categoryIds.length === 0) {
-			const fallback = await listTerms(db, 'category');
+			const fallback = await listTermChoices(db, 'category');
 			if (fallback.length > 0) categoryIds = [fallback[0].mid];
 		}
 		const tagIds = await ensureTags(db, payload.tagNames);

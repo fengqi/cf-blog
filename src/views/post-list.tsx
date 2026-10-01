@@ -6,7 +6,7 @@
  */
 
 import type { AdminPostRow } from '../models/content';
-import type { TermRecord } from '../publish/types';
+import type { TermChoice } from '../publish/types';
 import { formatDate } from '../../theme/layout';
 import { AdminLayout } from './layout';
 
@@ -18,7 +18,7 @@ export interface PostListPageProps {
 	totalPages: number;
 	needsSync: number;
 	/** 分类下拉选项（筛选用） */
-	categories: TermRecord[];
+	categories: TermChoice[];
 	/** 当前生效的筛选（回填表单；空串 = 没筛） */
 	filters: { q: string; status: string; categoryMid: number | '' };
 	user: { screen_name: string | null; username: string };

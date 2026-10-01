@@ -13,8 +13,18 @@ import type { Db } from '../lib/db';
 import { refreshMetaCountsStatement } from './meta';
 import type { MonthRecord, PostRecord, TermRecord } from '../publish/types';
 
-/** 聚合分类/标签的公共子查询；`type` 传 null 表示全都聚合 */
-function metaAggregate(type: 'category' | 'tag' | null): string {
+/**
+ * 聚合分类/标签的公共子查询；`type` 传 null 表示全都聚合，`alias` 是外层内容表的别名。
+ *
+ * ⚠️⚠️ **`FROM (...) AS m` 那层包装一个字都不能动** —— 看着多余，其实它决定了结果顺序。
+ * 试过直接 `FROM relationships r JOIN metas m2 ... ORDER BY m2.type, m2.mid`：
+ * rows_read 从 1514 降到 1120（-26%），但**顺序错了** —— 去掉包装后 SQLite 只按 mid 排，
+ * `ORDER BY` 里的 `m2.type` 被丢掉，分类与标签混在一起（生产库 164 篇里 4 篇顺序变了，
+ * cid=394 从 [PHP, Unix, php, nginx, ...] 变成 [PHP, php, Unix, nginx, ...]）。
+ * 分类在前是 `primaryCategory()` 的前提 —— 它取第一个 category 拼 URL，顺序变了 URL 就变。
+ * 少读 394 行换 URL 漂移，不划算（2026-10-01 实测）。
+ */
+function metaAggregate(type: 'category' | 'tag' | null, alias = 'c'): string {
 	const filter = type ? `AND m2.type = '${type}'` : '';
 	return `COALESCE((
 		SELECT json_group_array(json_object(
@@ -23,7 +33,7 @@ function metaAggregate(type: 'category' | 'tag' | null): string {
 		  FROM (SELECT m2.mid, m2.name, m2.slug, m2.type, m2.description
 		          FROM relationships r
 		          JOIN metas m2 ON m2.mid = r.mid
-		         WHERE r.cid = c.cid ${filter}
+		         WHERE r.cid = ${alias}.cid ${filter}
 		         ORDER BY m2.type, m2.mid) AS m
 	), '[]')`;
 }
@@ -265,13 +275,21 @@ export async function listAdminPosts(
 ): Promise<AdminPostRow[]> {
 	const { sql, params } = adminPostWhere(filter);
 	params.push(limit, offset);
+	/**
+	 * ⚠️ **先分页，再聚合分类** —— 写成一层的 `ORDER BY ... LIMIT ? OFFSET ?` 时，
+	 * SQLite 会对**排序前的每一行**都算一遍分类聚合（164 篇候选 × 7 个分类），
+	 * 而最终只要 10 行：生产实测 1351 rows_read。把分页塞进内层子查询后降到 431。
+	 */
 	const rows = await db.all<ContentRow & { needs_sync: number }>(
-		`SELECT c.cid, c.title, c.slug, c.type, c.status, c.created, c.modified, c.words,
-		        c.needs_sync, c.excerpt, ${metaAggregate('category')} AS categories
-		   FROM contents c
-		  WHERE ${sql}
-		  ORDER BY c.created DESC, c.cid DESC
-		  LIMIT ? OFFSET ?`,
+		`SELECT x.cid, x.title, x.slug, x.type, x.status, x.created, x.modified, x.words,
+		        x.needs_sync, x.excerpt, ${metaAggregate('category', 'x')} AS categories
+		   FROM (SELECT c.cid, c.title, c.slug, c.type, c.status, c.created, c.modified,
+		                c.words, c.needs_sync, c.excerpt
+		           FROM contents c
+		          WHERE ${sql}
+		          ORDER BY c.created DESC, c.cid DESC
+		          LIMIT ? OFFSET ?) AS x
+		  ORDER BY x.created DESC, x.cid DESC`,
 		params,
 	);
 	return rows.map((row) => ({

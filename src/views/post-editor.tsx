@@ -8,13 +8,14 @@
  */
 
 import type { AttachmentRow, EditorView } from '../models/content';
-import type { TermRecord } from '../publish/types';
+import type { TermChoice } from '../publish/types';
 import { formatDateTimeLocal } from '../lib/time';
 import { AdminLayout } from './layout';
 
 export interface PostEditorPageProps {
 	post?: EditorView;
-	categories: TermRecord[];
+	/** 分类勾选框（只用 mid/name，没有 count） */
+	categories: TermChoice[];
 	/** 已挂在这篇文章上的附件（右侧「附件」tab 的初始清单；新建时为空） */
 	attachments: AttachmentRow[];
 	/** 静态资源域名：附件插入正文用的是完整地址（预览与前台都指向它，与站点域名解耦） */

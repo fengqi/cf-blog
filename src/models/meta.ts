@@ -12,7 +12,7 @@
  */
 
 import type { Db } from '../lib/db';
-import type { TermRecord } from '../publish/types';
+import type { TermChoice, TermRecord } from '../publish/types';
 
 export interface TermRow {
 	mid: number;
@@ -55,6 +55,19 @@ function toTerm(row: TermRow): TermRecord {
 export async function listTerms(db: Db, type: 'category' | 'tag'): Promise<TermRecord[]> {
 	const rows = await db.all<TermRow>(TERM_SQL, [type]);
 	return rows.map(toTerm);
+}
+
+/**
+ * 下拉/勾选框专用：**不数 count**。
+ *
+ * `listTerms` 的 COUNT 子查询要扫一遍「全部已发布文章 × 关系」（生产实测 1243 rows_read），
+ * 而后台筛选下拉、编辑器分类勾选只用到 mid 与 name —— 两次白付的开销。
+ * 这条直读 metas（生产实测：7 个分类 15 行 vs 1243 行）。
+ *
+ * ⚠️ 别拿它去显示计数：返回类型里**没有 count 字段**（见 `TermChoice` 的说明）。
+ */
+export async function listTermChoices(db: Db, type: 'category' | 'tag'): Promise<TermChoice[]> {
+	return await db.all<TermChoice>(`SELECT mid, name FROM metas WHERE type = ? ORDER BY sort_order, mid`, [type]);
 }
 
 /**

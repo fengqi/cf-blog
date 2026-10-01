@@ -19,6 +19,18 @@ export interface TermRecord {
 	count: number;
 }
 
+/**
+ * 下拉/勾选框用的最小术语信息（后台筛选、编辑器分类勾选）。
+ *
+ * 刻意**不带 count**：那些地方不显示计数，而实时 COUNT 要扫一遍全站关系
+ * （生产实测 1243 rows_read，不带 count 只要 15 行）。类型上没有 count，
+ * 就不会有人误把它当计数显示 —— 要显示计数请用 `TermRecord`。
+ */
+export interface TermChoice {
+	mid: number;
+	name: string;
+}
+
 /** 一篇内容（文章或独立页面） */
 export interface PostRecord {
 	cid: number;

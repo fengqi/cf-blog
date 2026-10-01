@@ -145,8 +145,6 @@ export interface RenderPageProps {
 export function RenderPage(props: RenderPageProps) {
 	return (
 		<AdminLayout title="渲染 · 博客后台" user={props.user} message={props.message} error={props.error}>
-			<h1>渲染</h1>
-
 			<div class="render-block">
 				<h2>全站渲染</h2>
 				<p class="hint">

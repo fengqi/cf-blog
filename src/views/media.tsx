@@ -1,9 +1,10 @@
 /**
  * 媒体库 —— design.md §9 / 待办 ④
  *
- * 上传（SSR multipart 表单）+ 列表 + 复制链接。列表数据来自 D1 的
- * type='attachment' 记录（迁移来的 62 个与新增的混在同一份清单里）。
- * 「复制」用几行原生 JS（§0：后台 = SSR 表单 + 少量原生 JS）。
+ * **只有列表，不再提供上传**：上传入口统一在编辑器右侧「附件」tab（`/admin/media/upload`），
+ * 那里传完能直接插进光标处，还能当场删；媒体库只负责回看和清理。
+ * 列表数据来自 D1 的 type='attachment' 记录（迁移来的 62 个与新增的混在同一份清单里），
+ * LEFT JOIN 出所属文章。
  */
 
 import type { AttachmentRow } from '../models/content';
@@ -11,26 +12,18 @@ import { formatDate } from '../../theme/layout';
 import { AdminLayout } from './layout';
 
 export interface MediaLibraryPageProps {
+	/** 当前这一页的附件 */
 	attachments: AttachmentRow[];
+	/** 附件总数（分页用；标题里显示的也是它，不是当页条数） */
+	total: number;
+	page: number;
+	totalPages: number;
 	siteUrl: string;
 	timezoneOffset: number;
 	user: { screen_name: string | null; username: string };
 	message?: string;
 	error?: string;
 }
-
-/** 复制链接的内联脚本（必须 dangerouslySetInnerHTML，见 layout.tsx 的说明） */
-const COPY_SCRIPT = `
-document.addEventListener('click', function (event) {
-  var button = event.target.closest('[data-copy]');
-  if (!button) return;
-  navigator.clipboard.writeText(button.getAttribute('data-copy')).then(function () {
-    var original = button.textContent;
-    button.textContent = '已复制';
-    setTimeout(function () { button.textContent = original; }, 1200);
-  });
-});
-`;
 
 function formatSize(bytes: number): string {
 	if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -46,29 +39,18 @@ export function MediaLibraryPage(props: MediaLibraryPageProps) {
 			message={props.message}
 			error={props.error}
 		>
-			<form method="post" action="/admin/media" enctype="multipart/form-data" class="stack">
-				<div>
-					<label for="files">上传附件（可多选）</label>
-					<input type="file" id="files" name="files" multiple />
-					<p class="hint">
-						白名单：jpg / png / webp / gif / avif / pdf，单个 ≤ 10MB；存到
-						<code>/usr/uploads/&lt;年&gt;/&lt;月&gt;/</code>，文件名不变。附件是不可变的（immutable）
-						—— <strong>同名文件不能覆盖</strong>，要换图就换个文件名
-					</p>
-				</div>
-				<div class="actions">
-					<button type="submit">上传</button>
-				</div>
-			</form>
-
-			<h2 style="font-size:1rem;margin:1.5rem 0 .5rem">已上传（{props.attachments.length}）</h2>
+			<h2 style="font-size:1rem;margin:1.5rem 0 .5rem">
+				已上传（{props.total}
+				{props.totalPages > 1 ? ` · 第 ${props.page} / ${props.totalPages} 页` : ''}）
+			</h2>
 			<table>
 				<thead>
 					<tr>
 						<th>文件</th>
 						<th>类型 / 大小</th>
 						<th>时间</th>
-						<th>链接</th>
+						<th>所属文章</th>
+						<th>操作</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -86,18 +68,26 @@ export function MediaLibraryPage(props: MediaLibraryPageProps) {
 									{file.mime ?? '—'} · {formatSize(file.size)}
 								</td>
 								<td class="hint">{formatDate(file.created, props.timezoneOffset)}</td>
+								<td class="hint">
+									{file.parent_cid && file.parent_title ? (
+										<a href={`/admin/posts/${file.parent_cid}/edit`}>{file.parent_title}</a>
+									) : (
+										'—'
+									)}
+								</td>
 								<td>
+									{/* 包一层 .actions：与文章/分类列表的删除按钮同尺寸 */}
 									<div class="actions">
-										<input
-											type="text"
-											readonly
-											value={url}
-											aria-label={`链接：${file.title || file.r2_key}`}
-											style="flex:1;min-width:14rem;font-size:.8rem"
-										/>
-										<button type="button" data-copy={url}>
-											复制
-										</button>
+										<form
+											method="post"
+											action="/admin/media/delete"
+											onsubmit="return confirm('确定删除这个附件？R2 上的文件和记录一起删，正文里引用它的地方会变坏链')"
+										>
+											<input type="hidden" name="cid" value={String(file.cid)} />
+											<button class="danger" type="submit">
+												删除
+											</button>
+										</form>
 									</div>
 								</td>
 							</tr>
@@ -107,7 +97,31 @@ export function MediaLibraryPage(props: MediaLibraryPageProps) {
 			</table>
 			{props.attachments.length === 0 ? <p class="hint">还没有附件。</p> : null}
 
-			<script dangerouslySetInnerHTML={{ __html: COPY_SCRIPT }} />
+			{props.totalPages > 1 ? (
+				<nav class="admin-pagination" aria-label="媒体库分页">
+					{props.page > 1 ? (
+						<a class="button" href={`/admin/media?page=${props.page - 1}`}>
+							上一页
+						</a>
+					) : (
+						<span class="button" aria-disabled="true">
+							上一页
+						</span>
+					)}
+					<span class="hint">
+						第 {props.page} / {props.totalPages} 页
+					</span>
+					{props.page < props.totalPages ? (
+						<a class="button" href={`/admin/media?page=${props.page + 1}`}>
+							下一页
+						</a>
+					) : (
+						<span class="button" aria-disabled="true">
+							下一页
+						</span>
+					)}
+				</nav>
+			) : null}
 		</AdminLayout>
 	);
 }

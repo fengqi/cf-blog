@@ -47,70 +47,72 @@ export function CategoriesPage(props: CategoriesPageProps) {
 				</div>
 			</form>
 
-			<h2 style="font-size:1rem;margin:1.5rem 0 .5rem">全部分类（{props.categories.length}）</h2>
-			{/* 表单放在表格外面，单元格里的控件用 form 属性挂接 —— HTML 不允许 form 包 tr */}
-			{props.categories.map((term) => (
-				<form
-					id={`edit-${term.mid}`}
-					method="post"
-					action={`/admin/categories/${term.mid}`}
-					style="display:contents"
-				/>
-			))}
-			{props.categories.map((term) => (
-				<form
-					id={`delete-${term.mid}`}
-					method="post"
-					action={`/admin/categories/${term.mid}/delete`}
-					onsubmit="return confirm('确定删除该分类？主分类挂在它名下的文章会换地址（旧地址保留跳转）')"
-				/>
-			))}
-			<table>
-				<thead>
-					<tr>
-						<th>名称</th>
-						<th>缩略名（URL 片段）</th>
-						<th>描述</th>
-						<th>文章数</th>
-						<th>操作</th>
-					</tr>
-				</thead>
-				<tbody>
-					{props.categories.map((term) => (
+			<div class="stack-block">
+				<h2 style="font-size:1rem;margin:1.5rem 0 .5rem">全部分类（{props.categories.length}）</h2>
+				{/* 表单放在表格外面，单元格里的控件用 form 属性挂接 —— HTML 不允许 form 包 tr */}
+				{props.categories.map((term) => (
+					<form
+						id={`edit-${term.mid}`}
+						method="post"
+						action={`/admin/categories/${term.mid}`}
+						style="display:contents"
+					/>
+				))}
+				{props.categories.map((term) => (
+					<form
+						id={`delete-${term.mid}`}
+						method="post"
+						action={`/admin/categories/${term.mid}/delete`}
+						onsubmit="return confirm('确定删除该分类？主分类挂在它名下的文章会换地址（旧地址保留跳转）')"
+					/>
+				))}
+				<table>
+					<thead>
 						<tr>
-							<td>
-								<input form={`edit-${term.mid}`} type="text" name="name" value={term.name} required />
-							</td>
-							<td>
-								<input form={`edit-${term.mid}`} type="text" name="slug" value={term.slug} />
-							</td>
-							<td>
-								<input
-									form={`edit-${term.mid}`}
-									type="text"
-									name="description"
-									value={term.description ?? ''}
-								/>
-							</td>
-							<td class="hint">{term.count}</td>
-							<td>
-								<div class="actions">
-									<button form={`edit-${term.mid}`} type="submit">
-										保存
-									</button>
-									<button form={`delete-${term.mid}`} class="danger" type="submit">
-										删除
-									</button>
-								</div>
-							</td>
+							<th>名称</th>
+							<th>缩略名（URL 片段）</th>
+							<th>描述</th>
+							<th>文章数</th>
+							<th>操作</th>
 						</tr>
-					))}
-				</tbody>
-			</table>
-			<p class="hint">
-				改缩略名会让以它为主分类的文章换地址（旧地址自动保留 canonical）；删除分类前，先把只挂在它下面的文章移走。
-				保存后点文章列表的「全站重新渲染」一键刷全。
-			</p>
+					</thead>
+					<tbody>
+						{props.categories.map((term) => (
+							<tr>
+								<td>
+									<input form={`edit-${term.mid}`} type="text" name="name" value={term.name} required />
+								</td>
+								<td>
+									<input form={`edit-${term.mid}`} type="text" name="slug" value={term.slug} />
+								</td>
+								<td>
+									<input
+										form={`edit-${term.mid}`}
+										type="text"
+										name="description"
+										value={term.description ?? ''}
+									/>
+								</td>
+								<td class="hint">{term.count}</td>
+								<td class="ops">
+									<div class="actions">
+										<button form={`edit-${term.mid}`} type="submit">
+											保存
+										</button>
+										<button form={`delete-${term.mid}`} class="danger" type="submit">
+											删除
+										</button>
+									</div>
+								</td>
+							</tr>
+						))}
+					</tbody>
+				</table>
+				<p class="hint">
+					改缩略名会让以它为主分类的文章换地址（旧地址自动保留 canonical）；删除分类前，先把只挂在它下面的文章移走。
+					保存后点文章列表的「全站重新渲染」一键刷全。
+				</p>
+			</div>
 		</AdminLayout>
 	);
 }

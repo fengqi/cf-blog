@@ -25,11 +25,13 @@ app.get('/message', (c) => c.text('Hello Hono!'));
 // ① 公开路由：登录 / 登出
 app.route('/', authRoutes);
 
-// ② 鉴权：下面注册的 /admin/*、/preview/* 与 /usr/* 都要登录
+// ② 鉴权：下面注册的 /admin/*、/preview/* 与前台静态路径（/usr/*、/theme/*）都要登录
 app.use('/admin/*', requireAuth);
 app.use('/preview/*', requireAuth);
-// 附件读取：正文里的图片是根相对路径，后台域上没人服务 /usr/* 时预览会破图（见 routes/attachment.ts）
+// 前台静态路径：预览页用的是前台同款 HTML，图片 /usr/*、主题资源 /theme/* 都得有人服务，
+// 否则整页预览没有样式和 JS、正文图片破图（见 routes/attachment.ts）
 app.use('/usr/*', requireAuth);
+app.use('/theme/*', requireAuth);
 
 // ③ 受保护的后台、预览与附件读取
 app.route('/', adminRoutes);

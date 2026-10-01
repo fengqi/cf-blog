@@ -765,6 +765,22 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('登录后能预览草稿', previewOk.status === 200 && previewHtml.includes('草稿标题'));
 	check('预览带 noindex', (previewOk.headers.get('x-robots-tag') ?? '').includes('noindex'));
 
+	// 整页预览返回的是前台同款 HTML，里面 <link>/<script> 指向 /theme/* ——
+	// 后台域上没人服务这条路径的话，预览就是没有样式、没有 JS 的裸页
+	const themeUrl = themeAssetPath('style.css');
+	check('预览页引用指纹主题资源', previewHtml.includes(themeUrl), themeUrl);
+	const themeRes = await call(themeUrl, { headers: { cookie: sessionCookie } });
+	const themeType = themeRes.headers.get('content-type') ?? '';
+	check(
+		'后台域能取到 /theme/* （预览有样式）',
+		themeRes.status === 200 && themeType.includes('text/css'),
+		`${themeRes.status} ${themeType}`,
+	);
+	const themeNoAuth = await call(themeUrl);
+	check('/theme/* 未登录被拦', themeNoAuth.status === 302, String(themeNoAuth.status));
+	const themeMissing = await call('/theme/nope.aaaaaaaa.css', { headers: { cookie: sessionCookie } });
+	check('/theme/* 查不到返回 404', themeMissing.status === 404, String(themeMissing.status));
+
 	// 不勾分类新建：必须回落到默认分类，而不是拼不出 URL 报错
 	const noCategoryForm = await postForm(
 		'/admin/posts',
@@ -807,42 +823,17 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 		`total=${fullReport.total} written=${fullReport.written} nextOffset=${fullReport.nextOffset}`,
 	);
 
-	// 媒体库：页面 + multipart 上传（白名单外的 .txt 应被拒）
+	// 媒体库**只有列表**：上传入口统一在编辑器「附件」tab（/admin/media/upload）
 	const mediaPage = await call('/admin/media', { headers: { cookie: cookie2 } });
 	const mediaHtml = await mediaPage.text();
-	check('媒体库能打开', mediaPage.status === 200 && mediaHtml.includes('name="files"'));
-
-	const uploadForm = new FormData();
-	uploadForm.append('files', new File([new Uint8Array([137, 80, 78, 71])], 'e2e 图片.png', { type: 'image/png' }));
-	uploadForm.append('files', new File(['plain text'], 'bad.txt', { type: 'text/plain' }));
-	const uploadRes = await call('/admin/media', { method: 'POST', body: uploadForm, headers: { cookie: cookie2 } });
-	const uploadLoc = decodeURIComponent(uploadRes.headers.get('location') ?? '');
-	check('上传返回 303', uploadRes.status === 303);
-	check('白名单外的 .txt 被拒、png 成功', uploadLoc.includes('上传 1 个') && uploadLoc.includes('失败 1 个') && uploadLoc.includes('bad.txt'), uploadLoc);
-
-	const attRow = await all<{ cid: number; r2_key: string; mime: string; size: number }>(
-		"SELECT cid, r2_key, mime, size FROM contents WHERE type = 'attachment' ORDER BY cid DESC LIMIT 1",
-	);
-	check('附件元信息落库（mime/size/r2_key）', attRow[0]?.mime === 'image/png' && attRow[0]?.size === 4, JSON.stringify(attRow[0]));
-	check('附件 key 按 §9 路径规则', /^usr\/uploads\/\d{4}\/\d{2}\/e2e 图片\.png$/.test(attRow[0]?.r2_key ?? ''), attRow[0]?.r2_key);
-	const attObj = await env.BUCKET.get(attRow[0]?.r2_key ?? '');
 	check(
-		'附件写进 R2 且 immutable',
-		attObj !== null &&
-			attObj.httpMetadata?.cacheControl === 'public, max-age=31536000, immutable' &&
-			attObj.httpMetadata?.contentType === 'image/png',
-		JSON.stringify(attObj?.httpMetadata),
+		'媒体库能打开',
+		mediaPage.status === 200 && mediaHtml.includes('所属文章'),
+		`${mediaPage.status} ${mediaHtml.slice(0, 120)}`,
 	);
+	check('媒体库不再有上传入口（name=files）', !mediaHtml.includes('name="files"'));
 
-	const dupForm = new FormData();
-	dupForm.append('files', new File([new Uint8Array([1])], 'e2e 图片.png', { type: 'image/png' }));
-	const dupRes = await call('/admin/media', { method: 'POST', body: dupForm, headers: { cookie: cookie2 } });
-	check('同名附件不可覆盖（immutable）', dupRes.status === 303 && decodeURIComponent(dupRes.headers.get('location') ?? '').includes('不可覆盖'));
-
-	const mediaAfter = await (await call('/admin/media', { headers: { cookie: cookie2 } })).text();
-	check('媒体库列表显示新附件', mediaAfter.includes('e2e 图片.png') && mediaAfter.includes('data-copy'));
-
-	// 编辑器快速传图端点（单文件 JSON，与媒体库同一套校验）
+	// 编辑器快速传图端点（单文件 JSON）—— 现在上传只有这一个入口
 	const quickForm = new FormData();
 	quickForm.append('file', new File([new Uint8Array([137, 80, 78, 71])], 'e2e 编辑器图.png', { type: 'image/png' }));
 	const quickRes = await call('/admin/media/upload', { method: 'POST', body: quickForm, headers: { cookie: cookie2 } });
@@ -855,6 +846,40 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 			quickJson.isImage === true,
 		JSON.stringify(quickJson),
 	);
+
+	// 上传的落库与写 R2（同一套 §9 校验，改成走编辑器端点后仍要盯住）
+	const attRow = await all<{ cid: number; r2_key: string; mime: string; size: number }>(
+		"SELECT cid, r2_key, mime, size FROM contents WHERE cid = ?",
+		[quickJson.cid ?? 0],
+	);
+	check('附件元信息落库（mime/size/r2_key）', attRow[0]?.mime === 'image/png' && attRow[0]?.size === 4, JSON.stringify(attRow[0]));
+	check('附件 key 按 §9 路径规则', /^usr\/uploads\/\d{4}\/\d{2}\/e2e 编辑器图\.png$/.test(attRow[0]?.r2_key ?? ''), attRow[0]?.r2_key);
+	const attObj = await env.BUCKET.get(attRow[0]?.r2_key ?? '');
+	check(
+		'附件写进 R2 且 immutable',
+		attObj !== null &&
+			attObj.httpMetadata?.cacheControl === 'public, max-age=31536000, immutable' &&
+			attObj.httpMetadata?.contentType === 'image/png',
+		JSON.stringify(attObj?.httpMetadata),
+	);
+
+	// 同名再传一次：附件 immutable，不可覆盖（编辑器端点回 400 + 原因）
+	const dupForm = new FormData();
+	dupForm.append('file', new File([new Uint8Array([1])], 'e2e 编辑器图.png', { type: 'image/png' }));
+	const dupRes = await call('/admin/media/upload', { method: 'POST', body: dupForm, headers: { cookie: cookie2 } });
+	const dupBody = (await dupRes.json()) as { error?: string };
+	check(
+		'同名附件不可覆盖（immutable）',
+		dupRes.status === 400 && (dupBody.error ?? '').includes('不可覆盖'),
+		`${dupRes.status} ${dupBody.error}`,
+	);
+
+	const mediaAfter = await (await call('/admin/media', { headers: { cookie: cookie2 } })).text();
+	check(
+		'媒体库列表显示新附件',
+		mediaAfter.includes('e2e 编辑器图.png') && mediaAfter.includes('所属文章'),
+	);
+	check('媒体库每行带删除按钮', mediaAfter.includes('action="/admin/media/delete"'));
 
 	// 配了静态域名后，插入的图片地址就走它（与站点域名解耦）
 	const staticForm = await postForm(
@@ -947,6 +972,60 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('中文/空格文件名按 URL 编码请求也能取到', attEncoded.status === 200, String(attEncoded.status));
 	const attMissing = await call('/usr/uploads/2026/10/不存在.png', { headers: { cookie: cookie2 } });
 	check('附件不存在返回 404', attMissing.status === 404, String(attMissing.status));
+
+	// 媒体库的删除按钮（SSR 表单 → 303 回列表；与编辑器那个 JSON 端点共用 removeAttachment）
+	// 用一个专门的附件，别动 quickJson 那个 —— 后面的 attachments[] 断言还要用它
+	const delForm = new FormData();
+	delForm.append('file', new File([new Uint8Array([137, 80, 78, 71])], 'e2e 待删.png', { type: 'image/png' }));
+	const delUpload = await call('/admin/media/upload', { method: 'POST', body: delForm, headers: { cookie: cookie2 } });
+	const delJson = (await delUpload.json()) as { cid?: number };
+	const delTarget = await all<{ cid: number; r2_key: string }>('SELECT cid, r2_key FROM contents WHERE cid = ?', [
+		delJson.cid ?? 0,
+	]);
+	const delMedia = await postForm('/admin/media/delete', { cid: String(delJson.cid ?? 0) }, cookie2);
+	check('媒体库删除返回 303', delMedia.status === 303, String(delMedia.status));
+	check(
+		'媒体库删除后 D1 行与 R2 对象都没了',
+		(await env.BUCKET.get(delTarget[0]?.r2_key ?? '')) === null &&
+			(await all<{ cid: number }>('SELECT cid FROM contents WHERE cid = ?', [delJson.cid ?? 0])).length === 0,
+		JSON.stringify(delTarget[0]),
+	);
+	const mediaAfterDel = await (await call('/admin/media', { headers: { cookie: cookie2 } })).text();
+	check('删除后列表不再显示该附件', !mediaAfterDel.includes('e2e 待删.png'));
+	const delMediaAgain = await postForm('/admin/media/delete', { cid: String(delJson.cid ?? 0) }, cookie2);
+	const delAgainLoc = decodeURIComponent(delMediaAgain.headers.get('location') ?? '');
+	check(
+		'媒体库删不存在的附件回 error',
+		delMediaAgain.status === 303 && delAgainLoc.includes('附件不存在'),
+		`${delMediaAgain.status} ${delAgainLoc}`,
+	);
+
+	// 媒体库分页（每页 10 条）：先凑够 11 个以上附件
+	const attCountSql = "SELECT COUNT(*) AS count FROM contents WHERE type = 'attachment' AND r2_key IS NOT NULL";
+	let attTotal = (await all<{ count: number }>(attCountSql))[0]?.count ?? 0;
+	for (let i = 0; attTotal < 11 && i < 15; i += 1) {
+		const pageForm = new FormData();
+		pageForm.append('file', new File([new Uint8Array([1])], `e2e 分页${i}.png`, { type: 'image/png' }));
+		await call('/admin/media/upload', { method: 'POST', body: pageForm, headers: { cookie: cookie2 } });
+		attTotal = (await all<{ count: number }>(attCountSql))[0]?.count ?? 0;
+	}
+	const attPages = Math.ceil(attTotal / 10);
+	const rowsOn = (html: string): number => (html.match(/action="\/admin\/media\/delete"/g) ?? []).length;
+	const mediaPage1 = await (await call('/admin/media', { headers: { cookie: cookie2 } })).text();
+	const mediaPage2 = await (await call('/admin/media?page=2', { headers: { cookie: cookie2 } })).text();
+	check('媒体库第一页 10 条', rowsOn(mediaPage1) === 10, String(rowsOn(mediaPage1)));
+	check('媒体库第二页是剩下的', rowsOn(mediaPage2) === attTotal - 10, `${rowsOn(mediaPage2)} / 共 ${attTotal}`);
+	check(
+		'标题显示总数与页码',
+		mediaPage1.includes(`已上传（${attTotal} · 第 1 / ${attPages} 页）`),
+		`共 ${attTotal} 页 ${attPages}`,
+	);
+	const pageOverHtml = await (await call('/admin/media?page=99', { headers: { cookie: cookie2 } })).text();
+	check(
+		'页码越界夹回最后一页',
+		pageOverHtml.includes(`第 ${attPages} / ${attPages} 页`),
+		`共 ${attTotal}`,
+	);
 
 	const quickTxtForm = new FormData();
 	quickTxtForm.append('file', new File(['x'], 'bad.txt', { type: 'text/plain' }));

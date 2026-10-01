@@ -610,18 +610,45 @@ export interface AttachmentRow {
 	mime: string | null;
 	size: number;
 	r2_key: string;
+	/** 所属文章（附件的 parent）；没有归属时为 null */
+	parent_cid: number | null;
+	parent_title: string | null;
 }
 
-/** 后台媒体库列表（新→旧）；不回捞 body/rendered —— 附件没有这些 */
-export async function listAttachments(db: Db, limit = 200): Promise<AttachmentRow[]> {
+/** 媒体库每页条数（附件清单可能很长：迁移来的 62 个 + 之后新增的） */
+export const ATTACHMENTS_PER_PAGE = 10;
+
+/**
+ * 后台媒体库列表（新→旧，分页）；不回捞 body/rendered —— 附件没有这些。
+ * 顺带 LEFT JOIN 出所属文章：附件挂在文章上（编辑器上传时），列表里要能看到它属于哪篇。
+ */
+export async function listAttachments(
+	db: Db,
+	limit = ATTACHMENTS_PER_PAGE,
+	offset = 0,
+): Promise<AttachmentRow[]> {
 	return await db.all<AttachmentRow>(
-		`SELECT cid, title, created, mime, size, r2_key
-		   FROM contents
-		  WHERE type = 'attachment' AND r2_key IS NOT NULL
-		  ORDER BY created DESC, cid DESC
-		  LIMIT ?`,
-		[limit],
+		`SELECT a.cid, a.title, a.created, a.mime, a.size, a.r2_key,
+		        p.cid AS parent_cid, p.title AS parent_title
+		   FROM contents a
+		   LEFT JOIN contents p ON p.cid = a.parent AND p.type IN ('post', 'page')
+		  WHERE a.type = 'attachment' AND a.r2_key IS NOT NULL
+		  ORDER BY a.created DESC, a.cid DESC
+		  LIMIT ? OFFSET ?`,
+		[limit, offset],
 	);
+}
+
+/**
+ * 媒体库总条数（算分页用）。
+ * 过滤条件必须和 `listAttachments` **完全一致** —— `r2_key IS NOT NULL` 漏了会多算一页。
+ */
+export async function countAttachments(db: Db): Promise<number> {
+	const row = await db.first<{ count: number }>(
+		`SELECT COUNT(*) AS count FROM contents
+		  WHERE type = 'attachment' AND r2_key IS NOT NULL`,
+	);
+	return row?.count ?? 0;
 }
 
 /** 某篇文章名下的附件（编辑器右侧「附件」tab 的初始清单，新→旧） */

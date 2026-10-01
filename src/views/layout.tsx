@@ -162,7 +162,15 @@ tbody tr:hover td { background: var(--bg-soft); }
 
 /* --- 表单 --- */
 
-form.stack { display: grid; gap: 1rem; max-width: 46rem; }
+/* 窄表单居中：容器加宽到 82rem 后，46rem 的表单贴左很难看（设置/口令/分类创建等） */
+form.stack { display: grid; gap: 1rem; max-width: 46rem; margin-inline: auto; }
+/* 与窄表单同宽的区块：46rem 的表单下面接一张撑满 82rem 的表，左右不齐 */
+.stack-block { max-width: 46rem; margin-inline: auto; }
+/* 单元格 padding 会把首/末列往里推 0.6rem，跟上面贴着容器边的输入框对不齐 */
+.stack-block table th:first-child,
+.stack-block table td:first-child { padding-left: 0; }
+.stack-block table th:last-child,
+.stack-block table td:last-child { padding-right: 0; }
 label { display: block; font-weight: 600; margin-bottom: 0.3rem; }
 
 input[type=text], input[type=password], input[type=datetime-local], input[type=number], textarea, select {
@@ -223,12 +231,23 @@ form.stack .actions button[type=submit]:hover {
 	form.stack .actions button[type=submit]:hover { color: #0b1c33; }
 }
 
-/* 危险操作（删除）：描边带红，hover 才加底色 */
-.actions button.danger { border-color: var(--danger); color: var(--danger); }
-.actions button.danger:hover { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
+/* 危险操作（删除）：描边带红，hover 才加底色。
+   不限定在 .actions 里 —— 媒体库的删除按钮独占一格，没有 .actions 包着 */
+button.danger, a.button.danger { border-color: var(--danger); color: var(--danger); }
+button.danger:hover, a.button.danger:hover {
+	background: var(--danger-soft);
+	border-color: var(--danger);
+	color: var(--danger);
+}
 
 .actions { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
 .actions button, .actions a.button { padding: 0.35rem 0.8rem; font-weight: 400; }
+/* 表格操作列：列宽被压窄时两枚按钮会换行叠成两行（行高一倍），宽屏下锁死横排。
+   手机（<34rem）靠换行压窄，锁横排会让整张表横向溢出 */
+@media (min-width: 34rem) {
+	td.ops { white-space: nowrap; }
+	td.ops .actions { flex-wrap: nowrap; }
+}
 /* actions 行里的表单是布局单元，不是文档流里的块 —— 否则按钮和文字对不齐 */
 .actions form, .filter-bar form { margin: 0; }
 
@@ -246,10 +265,7 @@ form.stack .actions button[type=submit]:hover {
 
 /* 渲染维护页：两块独立操作 */
 .render-block {
-	border: 1px solid var(--border);
-	border-radius: var(--radius);
-	padding: 1.1rem 1.25rem;
-	margin-bottom: 1.25rem;
+	margin: 0 auto 1.25rem;
 	max-width: 46rem;
 }
 .render-block h2 { margin-top: 0; }
@@ -468,9 +484,8 @@ export function AdminLayout(props: AdminLayoutProps) {
 						<div class="top-inner">
 							<a class="brand" href="/admin">博客后台</a>
 							<a href="/admin">文章</a>
-							<a href="/admin/posts/new">写文章</a>
-							<a href="/admin/categories">分类</a>
 							<a href="/admin/media">媒体</a>
+							<a href="/admin/categories">分类</a>
 							<a href="/admin/settings">设置</a>
 							<a href="/admin/password">口令</a>
 							<a href="/admin/render">渲染</a>

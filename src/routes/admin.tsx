@@ -17,7 +17,9 @@ import {
 	countNeedsSync,
 	createAttachment,
 	createContent,
+	countAttachments,
 	deleteAttachment,
+	ATTACHMENTS_PER_PAGE,
 	getContentByCid,
 	getEditorView,
 	type ContentInput,
@@ -284,13 +286,20 @@ adminRoutes.post('/admin/settings', async (c) => {
 
 adminRoutes.get('/admin/media', async (c) => {
 	const db = createDb(c.env.DB, 'admin');
+	const total = await countAttachments(db);
+	const totalPages = Math.max(1, Math.ceil(total / ATTACHMENTS_PER_PAGE));
+	// 页码越界就夹回最后一页（删完一页的最后一条时，正停在空页上）
+	const page = Math.min(Math.max(1, Number(c.req.query('page')) || 1), totalPages);
 	const [options, attachments] = await Promise.all([
 		getSiteOptions(c.env),
-		listAttachments(db),
+		listAttachments(db, ATTACHMENTS_PER_PAGE, (page - 1) * ATTACHMENTS_PER_PAGE),
 	]);
 	return c.html(
 		<MediaLibraryPage
 			attachments={attachments}
+			total={total}
+			page={page}
+			totalPages={totalPages}
 			// 附件是静态资源：链接用静态域名（与站点域名解耦）
 			siteUrl={options.staticUrl}
 			timezoneOffset={options.timezoneOffset}
@@ -302,8 +311,26 @@ adminRoutes.get('/admin/media', async (c) => {
 });
 
 /**
- * 单文件上传（§9 校验 → 写 R2 → 元信息落 D1）。媒体库页与编辑器快速传图共用：
- * 媒体库页把结果拼成整页跳转消息，编辑器的 JSON 端点把它变成 `{url}` 供光标处插入。
+ * 媒体库删除（列表里那颗「删除」按钮）：SSR 表单 → 303 回列表，删完直接看得见结果。
+ * 与编辑器那个 JSON 端点共用 `removeAttachment`，只是回包形态不同（整页 vs 摘列表项）。
+ */
+adminRoutes.post('/admin/media/delete', async (c) => {
+	const db = createDb(c.env.DB, 'admin');
+	const form = await c.req.formData();
+	const cid = Number(form.get('cid'));
+	if (!Number.isFinite(cid) || cid <= 0) {
+		return c.redirect('/admin/media?error=' + encodeURIComponent('附件 cid 不合法'), 303);
+	}
+	const removed = await removeAttachment(c.env, db, cid);
+	const query = removed
+		? 'message=' + encodeURIComponent('附件已删除（R2 对象与记录一起删）')
+		: 'error=' + encodeURIComponent('附件不存在');
+	return c.redirect(`/admin/media?${query}`, 303);
+});
+
+/**
+ * 单文件上传（§9 校验 → 写 R2 → 元信息落 D1）。只有编辑器快速传图这一个入口：
+ * 传完拿到 `{url}` 直接插到光标处（媒体库页不再提供上传，见 MediaLibraryPage 的说明）。
  */
 type AttachmentUploadOutcome = { ok: true; name: string; key: string } | { ok: false; reason: string };
 
@@ -333,36 +360,6 @@ async function uploadAttachmentFile(
 	});
 	return { ok: true, name, key };
 }
-
-/**
- * 附件上传（§9）：校验类型/大小 → 写 R2（immutable，不可覆盖）→ 元信息落 D1。
- * 附件不进渲染流水线（needs_sync=0），所以这里没有 waitUntil / 发布动作。
- */
-adminRoutes.post('/admin/media', async (c) => {
-	const db = createDb(c.env.DB, 'admin');
-	const options = await getSiteOptions(c.env);
-	const form = await c.req.formData();
-	const files = form.getAll('files').filter((entry): entry is File => entry instanceof File && entry.size > 0);
-
-	if (files.length === 0) {
-		return c.redirect('/admin/media?error=' + encodeURIComponent('没有选择文件'), 303);
-	}
-
-	const uploaded: string[] = [];
-	const failed: string[] = [];
-	for (const file of files) {
-		const outcome = await uploadAttachmentFile(c.env, db, file, c.var.user.uid, options.timezoneOffset);
-		if (outcome.ok) uploaded.push(outcome.name);
-		else failed.push(outcome.reason);
-	}
-
-	if (uploaded.length === 0) {
-		return c.redirect('/admin/media?error=' + encodeURIComponent(`全部失败：${failed.join('；')}`), 303);
-	}
-	const message =
-		failed.length > 0 ? `上传 ${uploaded.length} 个；失败 ${failed.length} 个：${failed.join('；')}` : `已上传 ${uploaded.join('、')}`;
-	return c.redirect('/admin/media?message=' + encodeURIComponent(message), 303);
-});
 
 /**
  * 编辑器快速传图（仿 Typecho write-post 的附件插入）：单文件 JSON 端点，
@@ -410,20 +407,35 @@ async function firstAttachmentCid(db: ReturnType<typeof createDb>, r2Key: string
 }
 
 /**
- * 编辑器右侧「附件」tab 的快捷删除：D1 行 + R2 对象一起删（JSON，前端摘掉列表项）。
- * 不检查正文引用 —— 删了就是坏链，作者自己负责（Typecho 同款）。
+ * 删一个附件：R2 对象 + D1 行一起删，不留孤儿。
+ *
+ * ⚠️ **不检查正文引用** —— 删了正文里就是坏链，作者自己负责（Typecho 同款）。
+ * 两个入口共用：编辑器「附件」tab 的 JSON 端点、媒体库列表的删除按钮。
+ * @returns 有没有真删到（false = 附件不存在）
+ */
+async function removeAttachment(
+	env: AdminEnv,
+	db: ReturnType<typeof createDb>,
+	cid: number,
+): Promise<boolean> {
+	const row = await db.first<{ cid: number; r2_key: string | null }>(
+		`SELECT cid, r2_key FROM contents WHERE cid = ? AND type = 'attachment'`,
+		[cid],
+	);
+	if (!row) return false;
+	if (row.r2_key) await deleteAttachmentObject(env, row.r2_key);
+	await deleteAttachment(db, cid);
+	return true;
+}
+
+/**
+ * 编辑器右侧「附件」tab 的快捷删除：JSON，前端摘掉列表项，不整页刷新。
  */
 adminRoutes.post('/admin/attachments/:cid/delete', async (c) => {
 	const cid = Number(c.req.param('cid'));
 	if (!Number.isFinite(cid) || cid <= 0) return c.json({ error: '附件 cid 不合法' }, 400);
 	const db = createDb(c.env.DB, 'admin');
-	const row = await db.first<{ cid: number; r2_key: string | null }>(
-		`SELECT cid, r2_key FROM contents WHERE cid = ? AND type = 'attachment'`,
-		[cid],
-	);
-	if (!row) return c.json({ error: '附件不存在' }, 404);
-	if (row.r2_key) await deleteAttachmentObject(c.env, row.r2_key);
-	await deleteAttachment(db, cid);
+	if (!(await removeAttachment(c.env, db, cid))) return c.json({ error: '附件不存在' }, 404);
 	return c.json({ ok: true, cid });
 });
 

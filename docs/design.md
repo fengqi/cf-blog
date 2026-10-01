@@ -171,10 +171,12 @@ Cloudflare 的 URL Rewrite **不能改写 hostname**（只能改 path 和 query�
 | `/admin/login`  | 登录（带 Turnstile）             |
 | `/admin/*`      | 写作、内容管理、设置                  |
 | `/admin/preview` | 编辑器预览（textarea 当前内容 → 服务端渲染成 HTML 片段；只在作者手动切 tab 时触发，是「渲染不进请求路径」在后台的**故意例外**） |
-| `/admin/media/upload` | 编辑器右侧「附件」tab 上传（单文件 JSON 端点，与媒体库同一套 §9 校验；带 `cid` 时附件直接挂在文章上） |
-| `/admin/attachments/:cid/delete` | 「附件」tab 的快捷删除（D1 行 + R2 对象一起删；不检查正文引用，同 Typecho） |
-| `/preview/:cid` | 草稿预览（未发布的文章不存在于 R2，只能在这里渲染） |
+| `/admin/media/upload` | 附件上传（**唯一入口**：编辑器右侧「附件」tab）。单文件 JSON 端点，§9 校验；带 `cid` 时附件直接挂在文章上。媒体库页不再提供上传 |
+| `/admin/attachments/:cid/delete` | 「附件」tab 的快捷删除（D1 行 + R2 对象一起删，JSON，前端摘掉列表项；不检查正文引用，同 Typecho） |
+| `/admin/media/delete` | 媒体库列表的「删除」按钮（SSR 表单 → 303 回列表；与上面那条共用 `removeAttachment`，只是回包形态不同） |
+| `/preview/:cid` | 草稿预览（未发布的文章不存在于 R2，只能在这里渲染）。**返回的是前台同款整页 HTML**，里面的根相对路径（`/usr/*`、`/theme/*`）由下面两条补 |
 | `/usr/*` | 后台域上的附件读取（正文里的图片是根相对路径，后台子域没有这条路由就会破图；同样要登录） |
+| `/theme/*` | 后台域上的主题资源读取。整页预览的 `<link>`/`<script>` 指向 `/theme/style.<hash>.css`，后台子域没人服务就是**没有样式和 JS 的裸页**；带指纹所以 `immutable` 长缓存（同样要登录） |
 
 **代价要说清楚**：
 

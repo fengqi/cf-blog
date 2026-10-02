@@ -396,7 +396,8 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	await Promise.allSettled(waits);
 
 	const articleHtml = (await (await env.BUCKET.get('default/hello.html'))?.text()) ?? '';
-	check('正文渲染成 HTML', articleHtml.includes('<h1>标题一</h1>') && articleHtml.includes('<li>列表项 A</li>'));
+	// h1 现在也会被 extractToc 注入锚点 id（存量文章用 # 写章节），所以匹配带 id 的形式
+	check('正文渲染成 HTML', articleHtml.includes('<h1 id="标题一">标题一</h1>') && articleHtml.includes('<li>列表项 A</li>'));
 	check('<script> 被清除', !articleHtml.includes('<script>alert(1)</script>'));
 	check('onerror 属性被清除', !articleHtml.includes('onerror'));
 	// markdown 的 [x](javascript:…) 会被 markdown-it 拒绝成字面文本（惰性，无害）；
@@ -422,15 +423,18 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	);
 	check('文章页不再有侧栏', !articleHtml.includes('class="sidebar"'));
 	// 目录是**服务端**抽取的（theme/toc.ts）：锚点 id 与目录链接在同一次渲染里产生
-	check('正文 h2/h3 被注入锚点 id', articleHtml.includes('<h2 id="二级标题">') && articleHtml.includes('<h3 id="三级标题">'));
+	check('正文 h1/h2/h3 被注入锚点 id', articleHtml.includes('<h1 id="标题一">') && articleHtml.includes('<h2 id="二级标题">') && articleHtml.includes('<h3 id="三级标题">'));
 	check('重复标题的锚点 id 会去重', articleHtml.includes('<h2 id="二级标题-2">'));
 	check(
 		'宽屏右栏目录由服务端渲染',
 		articleHtml.includes('<aside class="post-toc" aria-label="文章目录">') &&
+			articleHtml.includes('href="#标题一"') &&
 			articleHtml.includes('href="#二级标题"') &&
 			articleHtml.includes('href="#三级标题"') &&
 			articleHtml.includes('href="#二级标题-2"'),
 	);
+	// 层级归一化：正文最浅是 h1（存量 Typecho 文章用 # 写章节），h1 归到二级、h2/h3 归到三级
+	check('目录层级归一化（h1→二级，h2/h3→三级）', articleHtml.includes('toc-level-2"><a href="#标题一"') && articleHtml.includes('toc-level-3"><a href="#二级标题"'));
 	check(
 		'窄屏折叠目录用原生 details（不依赖 JS）',
 		articleHtml.includes('<details class="post-toc-inline">') && articleHtml.includes('<summary>目录</summary>'),
@@ -524,9 +528,9 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('页面 needs_sync 已清零', pageRow[0].needs_sync === 0);
 	const pageHtml = (await (await env.BUCKET.get('about.html'))?.text()) ?? '';
 	check('页面对象已重建且有正文', pageHtml.includes('这是关于页面'));
-	// 独立页面只有 `# 关于` 一个 h1，没有 h2/h3 —— 不该出现空目录栏
+	// 独立页面只有 `# 关于` 一个标题 → 目录只有一条，没有导航价值 —— 不渲染目录栏
 	check(
-		'没有 h2/h3 的页面不渲染目录',
+		'目录不足两条的页面不渲染目录',
 		!pageHtml.includes('<aside class="post-toc"') && !pageHtml.includes('post-toc-inline'),
 	);
 	check(

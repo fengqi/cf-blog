@@ -6,8 +6,13 @@
  *   - 服务端抽取出来的目录写在 HTML 里，**没有 JS 也能看、也能点**；
  *   - 目录和锚点在同一次渲染里产生，顺序天然一致，不会错位。
  *
- * 只收 h2 / h3：h1 是文章标题本身（`theme/post.ts` 输出的 `.post-title`），
- * h4 及更深的层级在中文技术文里通常是补注，进目录只会让目录比正文还长。
+ * 正文里抽 h1 / h2 / h3，**按「出现的最浅层级」归一化**（最浅 → 二级、其余 → 三级）：
+ *   - 页面标题是 `theme/post.ts` 单独输出的 `.post-title`，不在 `post.html` 里，
+ *     所以正文里的 h1 不是「文章标题本身」—— 存量 Typecho 文章的章节就是用 `#` 写的，
+ *     只收 h2/h3 会让这批文章（如 `/php/394.html`）整篇出不来目录；
+ *   - 归一化后目录最多两级（`toc-level-2` / `toc-level-3`），正文标题层级写得不规范
+ *     （`#` 开头或 `###` 开头）也能得到一个层级正确的目录；
+ *   - h4 及更深的层级在中文技术文里通常是补注，进目录只会让目录比正文还长。
  *
  * 零依赖纪律同 `layout.ts` 顶部（不 import 任何包、不碰 D1/R2/Hono）。
  */
@@ -28,8 +33,8 @@ export interface TocResult {
 	items: TocItem[];
 }
 
-/** 只匹配 h2/h3：闭合标签用反向引用保证开闭层级一致（`<h2>…</h3>` 不匹配） */
-const HEADING_PATTERN = /<h([23])((?:\s[^>]*)?)>([\s\S]*?)<\/h\1>/gi;
+/** 匹配 h1/h2/h3：闭合标签用反向引用保证开闭层级一致（`<h2>…</h3>` 不匹配） */
+const HEADING_PATTERN = /<h([123])((?:\s[^>]*)?)>([\s\S]*?)<\/h\1>/gi;
 
 const ENTITIES: Record<string, string> = {
 	'&amp;': '&',
@@ -84,20 +89,31 @@ function uniqueId(base: string, used: Set<string>): string {
  *
  * 返回的是新字符串（`post.html` 是只读输入）—— 所以同一篇文章渲染成
  * 「规范 URL」与「旧 URL」两个对象时，两份的 id 完全一致，不会互相打断锚点。
+ *
+ * 层级归一化要**两步**：先按原始层级收集（id 的生成与层级无关，可以同步写回），
+ * 收集完才知道全篇最浅层级是几，再把目录条目平移成最多两级。
  */
 export function extractToc(html: string): TocResult {
-	const items: TocItem[] = [];
+	const raw: Array<{ item: TocItem; level: number }> = [];
 	const used = new Set<string>();
 	let index = 0;
 
 	const withAnchors = html.replace(HEADING_PATTERN, (_match, levelRaw: string, attrs: string, inner: string) => {
-		const level = Number(levelRaw) as 2 | 3;
+		const level = Number(levelRaw);
 		index += 1;
 		const text = plainText(inner);
 		const id = uniqueId(slugify(text, index), used);
-		items.push({ id, text: text || id, level });
+		raw.push({ item: { id, text: text || id, level: 2 }, level });
 		return `<h${level}${attrs} id="${escapeHtml(id)}">${inner}</h${level}>`;
 	});
 
-	return { html: withAnchors, items };
+	// 最浅层级 → 2，更深逐级 +1，封顶 3（h1/h2/h3 最多差两级，平移后不会超过 3）
+	if (raw.length > 0) {
+		const shallowest = Math.min(...raw.map((entry) => entry.level));
+		for (const entry of raw) {
+			entry.item.level = Math.min(entry.level - shallowest + 2, 3) as 2 | 3;
+		}
+	}
+
+	return { html: withAnchors, items: raw.map((entry) => entry.item) };
 }

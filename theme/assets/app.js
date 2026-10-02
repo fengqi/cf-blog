@@ -51,7 +51,7 @@
 			}
 		}
 
-		var headings = document.querySelectorAll('.post-content h2[id], .post-content h3[id]');
+		var headings = document.querySelectorAll('.post-content h1[id], .post-content h2[id], .post-content h3[id]');
 		if (headings.length > 0) {
 			var highlighted = null;
 

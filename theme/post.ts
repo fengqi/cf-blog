@@ -121,7 +121,9 @@ export function renderPost(context: PostContext): string {
 	 * 所以必须在拼 `post.html` 之前做，渲染完的 `contentHtml` 才是带 id 的那份。
 	 */
 	const { html: contentHtml, items: toc } = extractToc(post.html);
-	const tocItems = toc.length > 0 ? renderTocItems(toc) : '';
+	// 目录少于两条就没有导航价值（「目录 → 关于」这种自指条目纯属噪音），不渲染
+	const hasToc = toc.length >= 2;
+	const tocItems = hasToc ? renderTocItems(toc) : '';
 
 	/**
 	 * 目录出现两遍是**故意的**：
@@ -131,8 +133,7 @@ export function renderPost(context: PostContext): string {
 	 * 只出现一次的方案要么需要 JS 搬 DOM，
 	 * 要么得给 `<details>` 做「宽屏强制展开」的 hack（`open` 由 UA 控制，CSS 盖不住）。
 	 */
-	const inlineToc =
-		toc.length > 0
+	const inlineToc = hasToc
 			? `
 		<details class="post-toc-inline">
 			<summary>目录</summary>
@@ -161,9 +162,9 @@ ${contentHtml}
 ${article}
 		</div>`;
 
-	// 没有 h2/h3 的文章（短文、纯代码笔记）不渲染空目录栏 —— 版式和有目录的文章完全一样
+	// 没有目录（标题少于两条）的文章不渲染目录栏 —— 版式和有目录的文章完全一样
 	const content =
-		toc.length > 0
+		hasToc
 			? `	<div class="post-layout post-layout--with-toc">
 ${body}
 		<aside class="post-toc" aria-label="文章目录">

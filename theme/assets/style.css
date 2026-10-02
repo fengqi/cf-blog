@@ -460,6 +460,20 @@ hr {
 	margin-bottom: 0;
 }
 
+/*
+ * 摘要里可能带 <pre>/<code>，但 `.post-content` 的排版规则**不覆盖这里** ——
+ * UA 默认 `white-space: pre` 会让长代码行横向捅出卡片边框（实测：Delve 那篇的
+ * WARNING 行）。摘要里代码折行显示（pre-wrap），超长无空格串用 overflow-wrap 兜底。
+ */
+.post-excerpt {
+	overflow-wrap: anywhere;
+}
+
+.post-excerpt pre {
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
 .post-empty {
 	color: var(--text-muted);
 	text-align: center;

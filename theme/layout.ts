@@ -12,6 +12,7 @@
 
 import { stylesheetLinks, themeScripts } from './assets';
 import { escapeHtml, formatDate } from './html';
+import { renderIcon } from './icons';
 
 /**
  * 转义与时间格式化搬到了 `html.ts`。这里原样再导出一次，
@@ -36,14 +37,16 @@ export interface SiteInfo {
 export interface NavLink {
 	text: string;
 	url: string;
+	/** 图标 key（`theme/icons.ts` 的表），渲染在文字前面；不传就只有文字 */
+	icon?: string;
 }
 
 /**
  * 页面容器宽度。由 `body` 上的类控制（见 style.css 的「容器宽度」一节）：
  *   - `default` 1080px —— 目前没有页面用它，留给将来需要宽幅的页面
- *   - `narrow`   50rem  —— 目前**所有**页面：列表 / 分页 / 归档 / 索引页 / 独立页面 / 文章页。
+ *   - `narrow`   56rem  —— 目前**所有**页面：列表 / 分页 / 归档 / 索引页 / 独立页面 / 文章页。
  *                          具体数值是 `style.css` 的 `--container-size`（宽度只有一个开关）。
- *                          不限制宽度的话一行能塞六十多个汉字，所以上限收在「约 44 个汉字一行」。
+ *                          不限制宽度的话一行能塞六十多个汉字，所以上限收在「约 50 个汉字一行」。
  *                          文章页的目录**不占正文宽度**（宽屏浮在容器右边的留白里，
  *                          窄屏折叠进正文顶部），所以「有目录」不需要更宽的容器 ——
  *                          全站一个宽度档就够，页头 / 页脚 / 正文的左边缘处处重合。
@@ -75,20 +78,8 @@ export interface LayoutOptions {
 }
 
 /**
- * 首屏应用主题的内联脚本。
- *
- * **必须内联、必须同步、必须放在 `<head>`**：`app.js` 是 `defer` 的，等它跑起来页面已经
- * 用亮色画过了，暗色用户会看到一帧闪白。它只做两件事：
- *   ① 给 `<html>` 加 `.js` —— 切换按钮的显隐由这个类控制（没有 JS 就别露出死按钮）
- *   ② 若用户手动选过主题（localStorage），立刻把 `data-theme` 设上
- * 没选过就不设 —— CSS 的 `prefers-color-scheme` 分支会接管，**没有 JS 也能进暗色**。
+ * 站点根 URL 归一化：去掉末尾斜杠，便于拼相对路径。
  */
-const THEME_INIT_SCRIPT =
-	`<script>(function(){var root=document.documentElement;root.className+=" js";` +
-	`try{var saved=localStorage.getItem("theme");` +
-	`if(saved==="dark"||saved==="light")root.setAttribute("data-theme",saved);}catch(err){}})();</script>`;
-
-/** 站点根 URL 归一化：去掉末尾斜杠，便于拼相对路径。 */
 function siteBase(site: SiteInfo): string {
 	return site.url.replace(/\/+$/, '');
 }
@@ -131,16 +122,22 @@ export function renderLayout(options: LayoutOptions): string {
 	);
 	// 带指纹的主题样式（§7.2）：路径来自 assets.generated.ts，文件名即缓存键
 	head.push(stylesheetLinks());
-	head.push(THEME_INIT_SCRIPT);
 	if (options.extraHead) head.push(options.extraHead);
 
 	const navHtml = nav
-		.map((link) => `<a href="${escapeHtml(link.url)}">${escapeHtml(link.text)}</a>`)
+		.map(
+			(link) =>
+				`<a href="${escapeHtml(link.url)}">${renderIcon(link.icon)}${escapeHtml(link.text)}</a>`,
+		)
 		.join('\n\t\t\t');
 
-	const descriptionHtml = site.description
-		? `\n\t\t\t\t<p class="site-description">${escapeHtml(site.description)}</p>`
-		: '';
+	/**
+	 * 页脚就一行：版权在前、站点描述在后，中间一个上下居中的点号（见
+	 * style.css 的 `.footer-meta`）。没有描述时只剩版权。
+	 */
+	const footerMeta = site.description
+		? `<p class="footer-meta">© ${year} ${escapeHtml(site.title)}<span class="footer-sep" aria-hidden="true">·</span>${escapeHtml(site.description)}</p>`
+		: `<p>© ${year} ${escapeHtml(site.title)}</p>`;
 
 	const bodyClass = options.width && options.width !== 'default' ? ` class="layout-${options.width}"` : '';
 
@@ -153,12 +150,11 @@ export function renderLayout(options: LayoutOptions): string {
 	<header class="site-header">
 		<div class="container site-header-inner">
 			<div class="site-brand">
-				<${titleTag} class="site-title"><a href="/">${escapeHtml(site.title)}</a></${titleTag}>${descriptionHtml}
+				<${titleTag} class="site-title"><a href="/">${escapeHtml(site.title)}</a></${titleTag}>
 			</div>
 			<nav class="site-nav">
 			${navHtml}
 			</nav>
-			<button type="button" class="theme-toggle" data-theme-toggle aria-label="切换深色 / 浅色模式" title="切换深色 / 浅色模式"></button>
 		</div>
 	</header>
 	<main class="container site-main">
@@ -166,7 +162,7 @@ ${content}
 	</main>
 	<footer class="site-footer">
 		<div class="container">
-			<p>© ${year} ${escapeHtml(site.title)}</p>
+			${footerMeta}
 		</div>
 	</footer>
 	${themeScripts()}${options.extraFoot ? '\n' + options.extraFoot : ''}

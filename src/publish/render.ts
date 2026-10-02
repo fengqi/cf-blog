@@ -71,15 +71,15 @@ function articlePath(post: PostRecord): string {
 }
 
 function toListPost(post: PostRecord): ListPost {
-	// 摘要在渲染期现算：手写摘要（Markdown）> `<!--more-->` 分界前半段 > 全文（无「阅读剩余部分」）
-	const summary = summaryView(post);
+	// 摘要在渲染期现算：手写摘要（Markdown）> `<!--more-->` 分界前半段 > 全文
 	return {
 		title: post.title,
 		url: articlePath(post),
 		created: post.created,
-		excerptHtml: summary.excerptHtml,
-		hasMore: summary.hasMore,
+		excerptHtml: summaryView(post),
 		categories: toTermLinks(post.categories),
+		// 标签也进列表项：底栏右下角和分类一起做成胶囊按钮（theme/components/list.ts）
+		tags: toTermLinks(post.tags),
 	};
 }
 
@@ -96,14 +96,15 @@ function toListPost(post: PostRecord): ListPost {
  * 全部页面」，因每次发/删页面都要全站重渲 ~800 个对象而否决，维持现状。
  */
 function toNav(snapshot: SiteSnapshot): NavLink[] {
+	// icon 是 theme/icons.ts 的 key；导航文案与图标的对应关系只在这一处
 	const nav: NavLink[] = [
-		{ text: '首页', url: homePath() },
-		{ text: '分类', url: overviewPath('categories') },
-		{ text: '标签', url: overviewPath('tags') },
-		{ text: '归档', url: overviewPath('archives') },
+		{ text: '首页', url: homePath(), icon: 'home' },
+		{ text: '分类', url: overviewPath('categories'), icon: 'categories' },
+		{ text: '标签', url: overviewPath('tags'), icon: 'tags' },
+		{ text: '归档', url: overviewPath('archives'), icon: 'archives' },
 	];
 	const about = snapshot.pages.find((page) => page.slug === ABOUT_SLUG);
-	if (about) nav.push({ text: '关于', url: standalonePagePath(about.slug) });
+	if (about) nav.push({ text: '关于', url: standalonePagePath(about.slug), icon: 'about' });
 	return nav;
 }
 
@@ -378,7 +379,7 @@ function renderFeed(snapshot: SiteSnapshot): string {
 		<link>${xmlEscape(link)}</link>
 		<guid isPermaLink="true">${xmlEscape(link)}</guid>
 		<pubDate>${formatRfc822(post.created)}</pubDate>
-		<description>${xmlEscape(makeExcerpt(summaryView(post).excerptHtml))}</description>
+		<description>${xmlEscape(makeExcerpt(summaryView(post)))}</description>
 		<content:encoded>${cdata(post.html)}</content:encoded>
 	</item>`;
 		})

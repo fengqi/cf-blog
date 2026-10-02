@@ -7,6 +7,7 @@
 
 import { escapeHtml, formatDate, formatDateTime, renderLayout } from './layout';
 import type { NavLink, SiteInfo } from './layout';
+import { renderIcon } from './icons';
 import { extractToc } from './toc';
 import type { TocItem } from './toc';
 
@@ -106,12 +107,12 @@ export function renderPost(context: PostContext): string {
 	const navHtml: string[] = [];
 	if (prev) {
 		navHtml.push(
-			`<span class="post-prev">上一篇：<a href="${escapeHtml(prev.url)}">${escapeHtml(prev.title)}</a></span>`,
+			`<span class="post-prev">${renderIcon('arrow-left')}上一篇：<a href="${escapeHtml(prev.url)}">${escapeHtml(prev.title)}</a></span>`,
 		);
 	}
 	if (next) {
 		navHtml.push(
-			`<span class="post-next">下一篇：<a href="${escapeHtml(next.url)}">${escapeHtml(next.title)}</a></span>`,
+			`<span class="post-next">下一篇：<a href="${escapeHtml(next.url)}">${escapeHtml(next.title)}</a>${renderIcon('arrow-right')}</span>`,
 		);
 	}
 
@@ -183,7 +184,7 @@ ${body}
 		canonicalPath: context.canonicalPath || post.url,
 		nav: context.nav,
 		/**
-		 * **全站一个宽度档**（`style.css` 的 `--container-size`，当前 50rem）。
+		 * **全站一个宽度档**（`style.css` 的 `--container-size`，当前 56rem）。
 		 *
 		 * 目录不再靠「把容器撑到 62rem」来腾位置 —— 宽屏时它浮在容器右边的留白里，
 		 * 窄屏折叠进正文顶部（见 style.css 的「11. 响应式」）。容器宽度与内容无关，

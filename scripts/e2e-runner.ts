@@ -322,10 +322,16 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	);
 	check(
 		'顶栏导航含 分类 / 标签 / 归档 / 关于',
-		homeHtml.includes('<a href="/categories/">分类</a>') &&
-			homeHtml.includes('<a href="/tags/">标签</a>') &&
-			homeHtml.includes('<a href="/archives/">归档</a>') &&
-			homeHtml.includes('<a href="/about.html">关于</a>'),
+		// 导航项带内联 SVG 图标（theme/icons.ts），<a> 里不再是纯文字 ——
+		// 只断言 href 与文案各自出现，不锁 <a> 的完整形状
+		homeHtml.includes('<a href="/categories/">') &&
+			homeHtml.includes('<a href="/tags/">') &&
+			homeHtml.includes('<a href="/archives/">') &&
+			homeHtml.includes('<a href="/about.html">') &&
+			homeHtml.includes('>分类</a>') &&
+			homeHtml.includes('>标签</a>') &&
+			homeHtml.includes('>归档</a>') &&
+			homeHtml.includes('>关于</a>'),
 	);
 	check('列表页是限宽版式（`.layout-narrow`）', homeHtml.includes('<body class="layout-narrow">'));
 	check('列表页不再输出两栏骨架', !homeHtml.includes('site-body'));
@@ -404,9 +410,9 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	check('文章页显示标签名', articleHtml.includes('>安卓</a>'));
 	check('文章页同样注入指纹 CSS link', articleHtml.includes(themeAssetPath('style.css')));
 	check(
-		'文章页骨架完整（顶栏导航 + 主题切换按钮 + 尾部脚本）',
-		articleHtml.includes('<a href="/categories/">分类</a>') &&
-			articleHtml.includes('data-theme-toggle') &&
+		'文章页骨架完整（顶栏导航 + 尾部脚本）',
+		// 同上：导航 <a> 里带 SVG 图标，只查 href 存在；主题切换按钮已整体移除
+		articleHtml.includes('<a href="/categories/">') &&
 			articleHtml.includes(`<script src="${themeAssetPath('app.js')}" defer></script>`),
 	);
 	// 全站同宽：有目录的文章页也不额外加宽，目录自己浮到容器右边的留白里（§11.1）
@@ -1194,7 +1200,7 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 	const moreHtml = await moreObj?.text() ?? '';
 	check('文章页正文完整（分界两半都在）', moreHtml.includes('这是标记前的摘要部分。') && moreHtml.includes('这是标记后的正文。'));
 
-	// 手写摘要：用作者写的那份（支持 Markdown），照样显示「阅读剩余部分」
+	// 手写摘要：用作者写的那份（支持 Markdown），渲染进列表项
 	const manualForm = await postForm(
 		'/admin/posts',
 		{
@@ -1228,21 +1234,21 @@ export async function runE2E(env: E2EEnv): Promise<string> {
 		homeExcerptHtml.includes('<div class="post-excerpt"><p>这是标记前的摘要部分。</p>'),
 		`hasDiv=${homeExcerptHtml.includes('post-excerpt')} hasText=${homeExcerptHtml.includes('这是标记前的摘要部分。')}`,
 	);
-	// 逐项检查列表项：有没有摘要、有没有「阅读剩余部分」
+	// 逐项检查列表项的摘要；「阅读剩余部分」已整体移除，任何列表项都不该再出现
 	const homeItems = homeExcerptHtml.split('<li class="post-item">').slice(1);
 	const itemBlock = (needle: string): string => {
 		const item = homeItems.find((entry) => entry.includes(needle)) ?? '';
 		const end = item.indexOf('</li>');
 		return end < 0 ? item : item.slice(0, end);
 	};
-	check('`<!--more-->` 分界的列表项显示「阅读剩余部分」', itemBlock('摘要分界测试').includes('post-more'));
+	check('列表项不再渲染「阅读剩余部分」', !homeExcerptHtml.includes('post-more'));
 	check(
-		'手写摘要项按 Markdown 渲染且显示「阅读剩余部分」',
-		itemBlock('手写摘要测试').includes('<strong>手写</strong>') && itemBlock('手写摘要测试').includes('post-more'),
+		'手写摘要项按 Markdown 渲染',
+		itemBlock('手写摘要测试').includes('<strong>手写</strong>'),
 	);
 	check(
-		'全文当摘要的列表项不显示「阅读剩余部分」',
-		itemBlock('没勾分类的文章').includes('没勾分类的文章') && !itemBlock('没勾分类的文章').includes('post-more'),
+		'全文当摘要的列表项正文完整',
+		itemBlock('没勾分类的文章').includes('没勾分类的文章'),
 	);
 
 	// 改口令（⑤）：错误当前口令 / 两次不一致 / 成功后旧会话全失效

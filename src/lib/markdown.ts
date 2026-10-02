@@ -95,18 +95,16 @@ export function makeExcerpt(html: string, limit = 200): string {
 
 /**
  * 列表摘要视图（发布渲染时现算，`excerpt` 列不存派生摘要）：
- *  1. 作者写了摘要（Markdown 原文）→ 渲染成 HTML，显示「阅读剩余部分」；
+ *  1. 作者写了摘要（Markdown 原文）→ 渲染成 HTML；
  *  2. 没写但 rendered 里有 `<!--more-->` 哨兵 → 取哨兵前的半段（已是渲染好的 HTML）；
- *  3. 都没有 → 全文当摘要，**不显示**「阅读剩余部分」。
+ *  3. 都没有 → 全文当摘要。
  */
-export function summaryView(
-	post: { excerpt: string; html: string },
-): { excerptHtml: string; hasMore: boolean } {
+export function summaryView(post: { excerpt: string; html: string }): string {
 	const manual = post.excerpt.trim();
-	if (manual) return { excerptHtml: renderMarkdown(manual), hasMore: true };
+	if (manual) return renderMarkdown(manual);
 	const index = post.html.indexOf(MORE_SENTINEL);
-	if (index > 0) return { excerptHtml: post.html.slice(0, index), hasMore: true };
-	return { excerptHtml: post.html, hasMore: false };
+	if (index > 0) return post.html.slice(0, index);
+	return post.html;
 }
 
 /**

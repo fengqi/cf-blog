@@ -27,9 +27,28 @@
 	--text-soft: #4a5259;
 	--text-muted: #79838d;
 
-	/* 强调色（链接、hover、标签） */
-	--accent: #1a63c8;
-	--accent-hover: #114a99;
+	/*
+	 * 强调色。**整站主色调 = Meilisearch 深品红**：正文链接、目录高亮、分页、
+	 * 悬停反馈全走它。hover 用「强一些」的同类色（更深一档）区分交互态。
+	 */
+	--accent: #d00064;
+	--accent-hover: #9d014b;
+
+	/*
+	 * Meilisearch 品牌色系：页头色带、列表卡片边框、术语按钮。
+	 * 奶油 #f7f0df（页头底色）、logo 粉 #ff5caa（页头边界线）、
+	 * 深品红 #d00064（奶油底上可读的文字）。卡片外框与 term-btn 共用
+	 * --card-border，是 logo 粉调淡后的同一色调。
+	 */
+	--header-bg: #f7f0df;
+	--header-line: #ff5caa;
+	--header-link-hover: #d00064;
+	--card-border: #f2c3d6;
+	--card-border-strong: #e795bd;
+	--term-btn-bg: #fdf3f8;
+	--term-btn-text: #d00064;
+	/* 卡片悬停投影：粉系暗影，只往底部晕开 */
+	--card-shadow: 0 6px 14px -6px rgba(208, 0, 100, 0.22);
 
 	/* 代码 */
 	--code-bg: #f6f8fa;
@@ -51,30 +70,24 @@
 	/**
 	 * 全站正文容器的宽度。**这是全站唯一的宽度开关**：`.layout-narrow .container` 用它，
 	 * 文章目录溢出到留白里的那条断点也从它推导（见「11. 响应式」）。
-	 * 50rem → 容器 800px − 内边距 40px = 正文 760px ≈ **44 个汉字一行**。
+	 * 56rem → 容器 896px − 内边距 40px = 正文 856px ≈ **50 个汉字一行**。
 	 * ⚠️ 改它必须同步重算「11. 响应式」里的目录断点 —— 媒体查询读不了 CSS 变量，
 	 * 断点只能手算（算法写在那一节的注释里）。
 	 */
-	--container-size: 50rem;
+	--container-size: 56rem;
 	--content-size: 1.0625rem; /* 17px：中文正文的舒适字号 */
 	--content-leading: 1.85;
-
-	/* 主题切换按钮的图标：暗色态换成月亮 */
-	--theme-toggle-icon: "\2600"; /* ☀ */
 
 	color-scheme: light;
 }
 
 /**
- * 暗色变量刻意写了**两块**：
- *   - 第一块给「系统是暗色且用户没手动选过」的访客（`data-theme` 由内联脚本按
- *     localStorage 设置，没有它就说明没手动选过）。这样**没有 JS 也能进暗色**。
- *   - 第二块给「用户手动点了切换按钮」的情况。
- * CSS 没法把变量重定义同时挂在媒体查询和属性选择器上，只能重复一遍 ——
- * 改这里务必两块一起改。
+ * 暗色只有**一块**变量重定义：跟随系统的 `prefers-color-scheme`。
+ * 手动切换按钮（含 localStorage 记忆、首屏内联脚本）已整体移除，没有 `data-theme`
+ * 可言 —— 想要暗色就在系统里设。
  */
 @media (prefers-color-scheme: dark) {
-	:root:not([data-theme="light"]) {
+	:root {
 		--bg: #14171b;
 		--bg-soft: #1b1f24;
 		--border: #2b3138;
@@ -82,37 +95,26 @@
 		--text: #e3e6e9;
 		--text-soft: #b6bcc3;
 		--text-muted: #8b949e;
-		--accent: #6cb0ff;
-		--accent-hover: #93c5fd;
+		/* 暗色底上粉色要提亮才够对比；hover 再亮一档（弱一些的同类色） */
+		--accent: #ff9bc9;
+		--accent-hover: #ffc4e0;
+		/* Meilisearch 色系的暗色版：页头换暖紫黑，粉色边界线保持，胶囊整体压暗 */
+		--header-bg: #221826;
+		--header-line: #ff5caa;
+		--header-link-hover: #ff9bc9;
+		--card-border: #47293a;
+		--card-border-strong: #653a51;
+		--term-btn-bg: #2a1a24;
+		--term-btn-text: #ff9bc9;
+		--card-shadow: 0 6px 14px -6px rgba(0, 0, 0, 0.55);
 		--code-bg: #161b21;
 		--code-text: #dfe4ea;
 		--tok-com: #8b949e;
 		--tok-str: #a5d6ff;
 		--tok-num: #79c0ff;
 		--tok-key: #ff7b72;
-		--theme-toggle-icon: "\263E"; /* ☾ */
 		color-scheme: dark;
 	}
-}
-
-:root[data-theme="dark"] {
-	--bg: #14171b;
-	--bg-soft: #1b1f24;
-	--border: #2b3138;
-	--border-strong: #3a424b;
-	--text: #e3e6e9;
-	--text-soft: #b6bcc3;
-	--text-muted: #8b949e;
-	--accent: #6cb0ff;
-	--accent-hover: #93c5fd;
-	--code-bg: #161b21;
-	--code-text: #dfe4ea;
-	--tok-com: #8b949e;
-	--tok-str: #a5d6ff;
-	--tok-num: #79c0ff;
-	--tok-key: #ff7b72;
-	--theme-toggle-icon: "\263E"; /* ☾ */
-	color-scheme: dark;
 }
 
 /* ==========================================================================
@@ -168,6 +170,14 @@ hr {
 	border-radius: var(--radius-sm);
 }
 
+/* 内联 SVG 图标（theme/icons.ts）：描边 currentColor，尺寸默认跟字号走 */
+.icon {
+	width: 1em;
+	height: 1em;
+	flex: none;
+	vertical-align: -0.125em;
+}
+
 .container {
 	width: 100%;
 	max-width: var(--container);
@@ -179,10 +189,14 @@ hr {
    3. 页头 / 页脚
    ========================================================================== */
 
+/*
+ * 页头是**通栏色带**：奶油底（Meilisearch #f7f0df）+ logo 粉的下边界线。
+ * 色带横贯整个视口宽，内容仍收在 .container 里。
+ */
 .site-header {
-	border-bottom: 1px solid var(--border);
-	background: var(--bg);
-	padding: 1.5rem 0;
+	border-bottom: 2px solid var(--header-line);
+	background: var(--header-bg);
+	padding: 1.25rem 0;
 }
 
 .site-header-inner {
@@ -214,11 +228,20 @@ hr {
 	text-decoration: none;
 }
 
-.site-description {
-	margin: 0.25rem 0 0;
-	color: var(--text-muted);
-	font-size: 0.875rem;
-	line-height: 1.5;
+/*
+ * 站点描述不再单独成块：并进页脚的版权行（layout.ts 的 footerMeta）。
+ */
+.footer-meta {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex-wrap: wrap;
+	gap: 0.55rem;
+}
+
+/* 分隔点号：align-items:center 让它垂直居中在版权与描述之间 */
+.footer-sep {
+	color: var(--border-strong);
 }
 
 .site-nav {
@@ -229,51 +252,25 @@ hr {
 }
 
 .site-nav a {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
 	color: var(--text-soft);
 }
 
 .site-nav a:hover {
-	color: var(--accent);
+	color: var(--header-link-hover);
 	text-decoration: none;
 }
 
-/* 主题切换：按钮本身由内联脚本加的 `.js` 控制显隐 —— 没有 JS 就别显示死按钮 */
-.theme-toggle {
-	display: none;
-	align-items: center;
-	justify-content: center;
-	width: 2rem;
-	height: 2rem;
-	padding: 0;
-	border: 1px solid var(--border);
-	border-radius: 50%;
-	background: var(--bg-soft);
-	color: var(--text-muted);
-	font-size: 0.9375rem;
-	line-height: 1;
-	cursor: pointer;
-	transition: border-color 0.15s ease, color 0.15s ease;
-}
-
-.js .theme-toggle {
-	display: inline-flex;
-}
-
-.theme-toggle::before {
-	content: var(--theme-toggle-icon);
-}
-
-.theme-toggle:hover {
-	border-color: var(--border-strong);
-	color: var(--accent);
-}
-
+/* 页脚整体居中：站点描述在版权行的上面一行（都来自 layout.ts 的 footer 块） */
 .site-footer {
 	border-top: 1px solid var(--border);
 	margin-top: 4rem;
 	padding: 1.75rem 0 2.5rem;
 	color: var(--text-muted);
 	font-size: 0.875rem;
+	text-align: center;
 }
 
 .site-footer p {
@@ -285,11 +282,11 @@ hr {
    ========================================================================== */
 
 /*
- * **全站一个宽度档：`--container-size`（当前 50rem）。**
+ * **全站一个宽度档：`--container-size`（当前 56rem）。**
  * 页头 / 页脚 / 正文 / 列表都在同一个容器里 —— 首页、分类页、关于页、文章页量出来
  * 是同一个矩形，左边缘、右边缘、正文宽度三者处处一致。
  *
- * 50rem 是怎么定的：容器 800px − 左右内边距 40px = **正文 760px ≈ 44 个汉字一行**。
+ * 56rem 是怎么定的：容器 896px − 左右内边距 40px = **正文 856px ≈ 50 个汉字一行**。
  * 定宽的原因是中文字宽，不是审美 —— 一行到五十多字就明显开始费眼。
  *
  * 文章页的目录**不占正文宽度**：宽屏时它浮在容器右边的留白里，窄屏折叠进正文顶部
@@ -316,15 +313,31 @@ hr {
 	padding: 0;
 }
 
+/*
+ * 列表项**卡片化**：每条内容一个带圆角的边框盒，替代原先的下划线分隔。
+ * 边框色与右下角术语按钮（.term-btn）共用 --card-border —— 同一色调的
+ * Meilisearch logo 粉柔和版（变量在 §1）。
+ *
+ * **整卡可点**：标题链接的 ::after 铺满卡片（stretched link），光标全卡为手型；
+ * 术语按钮必须留在铺满层之上（z-index），否则点不了。
+ */
 .post-item {
-	padding-bottom: 1.75rem;
-	margin-bottom: 1.75rem;
-	border-bottom: 1px solid var(--border);
+	position: relative;
+	padding: 1.35rem 1.5rem 1.15rem;
+	margin-bottom: 1.5rem;
+	border: 1px solid var(--card-border);
+	border-radius: var(--radius);
+	transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .post-item:last-child {
-	border-bottom: 0;
 	margin-bottom: 0;
+}
+
+/* 悬停：边框略微加深 + 底部投影（阴影色也是 Meilisearch 粉系，变量在 §1） */
+.post-item:hover {
+	border-color: var(--card-border-strong);
+	box-shadow: var(--card-shadow);
 }
 
 .post-item-title {
@@ -334,12 +347,87 @@ hr {
 	font-weight: 650;
 }
 
+/* 标题默认黑色，悬停（整卡范围，见 ::after 铺满层）才变术语按钮的品红 */
 .post-item-title a {
 	color: var(--text);
 }
 
+.post-item-title a::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+}
+
 .post-item-title a:hover {
-	color: var(--accent);
+	color: var(--term-btn-text);
+	text-decoration: none;
+}
+
+/*
+ * 列表项底栏：日期在**左下角**（前面有日历图标），分类/标签按钮在**右下角**。
+ * 结构见 theme/components/list.ts 的 renderItemFoot。
+ */
+.post-item-foot {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem 0.75rem;
+	margin-top: 1.1rem;
+	color: var(--text-muted);
+	font-size: 0.875rem;
+	line-height: 1.7;
+}
+
+.post-item-date {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+}
+
+/* 日历图标和术语按钮一个色调（日期文字保持中性灰） */
+.post-item-date .icon {
+	color: var(--term-btn-text);
+}
+
+.post-item-terms {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 0.4rem;
+	/* 窄屏折行后仍贴右，不和日期挤在同一行开头 */
+	margin-left: auto;
+	/* 抬到标题链接的铺满层（::after）之上，保证按钮本身可点 */
+	position: relative;
+	z-index: 1;
+}
+
+/*
+ * 术语胶囊按钮：**平时中性灰**（和左侧日期一个量级），粉色只在悬停时出现 ——
+ * 粉是交互信号，不是常驻装饰（卡片边框和日期图标已经带了粉，按钮再常驻粉就太满）。
+ */
+.term-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	padding: 0.12rem 0.7rem;
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	background: var(--bg-soft);
+	color: var(--text-soft);
+	font-size: 0.8125rem;
+	line-height: 1.6;
+	transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+/* 按钮里的图标用主题色（文字保持灰）—— 与日期「粉 icon + 灰文字」同一模式 */
+.term-btn .icon {
+	color: var(--term-btn-text);
+}
+
+.term-btn:hover {
+	border-color: var(--card-border-strong);
+	background: var(--term-btn-bg);
+	color: var(--term-btn-text);
 	text-decoration: none;
 }
 
@@ -372,21 +460,6 @@ hr {
 	margin-bottom: 0;
 }
 
-/* 「阅读剩余部分」：参考 Typecho 旧主题的 .more —— 纯文字、居中，不抢摘要的视觉权重 */
-.post-more {
-	margin: 0.9rem 0 0;
-	text-align: center;
-}
-
-.post-more a {
-	color: var(--text-soft);
-	font-size: 0.9375rem;
-}
-
-.post-more a:hover {
-	color: var(--accent-hover);
-}
-
 .post-empty {
 	color: var(--text-muted);
 	text-align: center;
@@ -403,6 +476,9 @@ hr {
 }
 
 .pagination a {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
 	padding: 0.35rem 0.9rem;
 	border: 1px solid var(--border);
 	border-radius: var(--radius);
@@ -429,7 +505,7 @@ hr {
  * 这一层（无目录 / 窄视口）永远只有一列，轨道直接取满容器内容宽。
  *
  * ⚠️ 这里**不能写 `min(42rem, 100%)`**。那个上限是「容器比正文宽」时代的产物
- * （62rem 容器 / 42rem 正文），当时恒被 100% 压住所以看不出问题；容器抬到 50rem
+ * （62rem 容器 / 42rem 正文），当时恒被 100% 压住所以看不出问题；容器抬到 56rem
  * 之后它就会真的生效，把正文重新卡回 672px，白白吃掉加宽。
  *
  * 目录在 HTML 里出现**两遍**（宽屏留白里的 `<aside>` / 窄屏正文顶部的 `<details>`），
@@ -485,7 +561,7 @@ hr {
 
 /*
  * 下面只管排印。**显隐和定位在「11. 响应式」**：默认不显示，
- * 视口够宽（≥80rem）时才贴到容器右边的留白里（`position: sticky`）。
+ * 视口够宽（≥86rem）时才贴到容器右边的留白里（`position: sticky`）。
  */
 .post-toc {
 	font-size: 0.875rem;
@@ -818,6 +894,8 @@ hr {
  * 从「撑满一行的块」收成「贴着内容的胶囊」：`inline-flex` 让宽度由内容决定
  * （**不设固定宽度**），`justify-content: space-between` 换成 `flex-start`，
  * 否则名称和计数之间会被拉开。
+ *
+ * 颜色与列表卡片右下角的术语按钮（.term-btn）同一套：平时中性灰，悬停转粉。
  */
 .term-list--flow .term-head {
 	display: inline-flex;
@@ -825,21 +903,24 @@ hr {
 	gap: 0.4rem;
 	padding: 0.28rem 0.7rem;
 	border: 1px solid var(--border);
-	border-radius: var(--radius);
+	border-radius: 999px;
 	background: var(--bg-soft);
-	transition: border-color 0.15s ease;
+	color: var(--text-soft);
+	transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
 }
 
 .term-list--flow .term-head:hover {
-	border-color: var(--accent);
+	border-color: var(--card-border-strong);
+	background: var(--term-btn-bg);
 }
 
 /* 胶囊整体响应 hover，不只是文字上 */
 .term-list--flow .term-head:hover a {
-	color: var(--accent);
+	color: var(--term-btn-text);
 }
 
 .term-list--flow .term-head a {
+	color: var(--text-soft);
 	font-size: 0.9375rem;
 }
 
@@ -912,8 +993,8 @@ hr {
  * 溢出量 = 目录 14rem + 间距 1.5rem。断点必须手算，媒体查询读不了 CSS 变量：
  *   正文右边缘（= 容器内容盒右边缘）在 `50% + (--container-size/2 − 1.25rem 内边距)`
  *   再往右溢出 15.5rem 之后要 ≤ 100%：
- *     50rem/2 − 1.25rem + 15.5rem = 39.25rem ≤ 50%  →  视口 ≥ 78.5rem
- *   取 80rem（1280px）为界，临界点上留 1.5rem 余量。
+ *     56rem/2 − 1.25rem + 15.5rem = 42.25rem ≤ 50%  →  视口 ≥ 84.5rem
+ *   取 86rem（1376px）为界，临界点上留 1.5rem 余量。
  * ⚠️ 改 `--container-size`、目录宽度或那个间距，都必须重算这个断点，
  *   否则窄一点儿的视口上目录会捅出横向滚动条。
  *
@@ -924,7 +1005,7 @@ hr {
 	display: none;
 }
 
-@media (min-width: 80rem) {
+@media (min-width: 86rem) {
 	.post-layout--with-toc {
 		/* 多出「目录 + 间距」这一截，溢出到容器右边的留白里；正文列仍是 1fr = 容器内容宽 */
 		width: calc(100% + 15.5rem);
@@ -967,6 +1048,10 @@ hr {
 
 	.post-item-title {
 		font-size: 1.1875rem;
+	}
+
+	.post-item {
+		padding: 1.1rem 1.15rem 0.95rem;
 	}
 
 	.site-main {

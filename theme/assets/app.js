@@ -9,37 +9,15 @@
  *   3. **不碰正文的其余部分**。只扫 `pre > code[class*="language-"]`，
  *      用的是 textContent + createTextNode，没有任何 innerHTML 拼接。
  *
- * 做三件事：
- *   - 暗色/亮色切换（选择存 localStorage；首屏应用由 `<head>` 里的内联脚本负责，避免闪白）
- *   - 代码块轻量语法高亮：只处理 markdown-it 打了 `language-xxx` 的围栏代码块
+ * 做两件事：
  *   - 文章目录的滚动高亮（只给宽屏右栏那一个目录上色，窄屏的 `<details>` 不动）
+ *   - 代码块轻量语法高亮：只处理 markdown-it 打了 `language-xxx` 的围栏代码块
+ *
+ * 深色 / 亮色交给系统的 `prefers-color-scheme`（CSS 变量两套值），不再有手动切换。
  */
 
 (function () {
 	'use strict';
-
-	var root = document.documentElement;
-
-	// ----------------------------------------------------------------------
-	// 暗色 / 亮色切换
-	// ----------------------------------------------------------------------
-
-	var toggle = document.querySelector('[data-theme-toggle]');
-	if (toggle) {
-		toggle.addEventListener('click', function () {
-			// 用户还没手动选过时，以系统偏好为起点，这样第一次点击一定是「切换到另一边」
-			var current =
-				root.getAttribute('data-theme') ||
-				(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-			var next = current === 'dark' ? 'light' : 'dark';
-			root.setAttribute('data-theme', next);
-			try {
-				window.localStorage.setItem('theme', next);
-			} catch (error) {
-				// 隐私模式/禁用存储时 setItem 会抛错。忽略：本次会话内切换依然生效
-			}
-		});
-	}
 
 	// ----------------------------------------------------------------------
 	// 文章目录滚动高亮

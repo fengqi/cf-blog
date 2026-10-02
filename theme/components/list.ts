@@ -9,6 +9,7 @@
 
 import { escapeHtml, formatDate, formatDateTime } from '../layout';
 import type { SiteInfo } from '../layout';
+import { renderIcon } from '../icons';
 import type { TermLink } from '../post';
 
 /** 列表项：首页、分类/标签/年月归档都用它 */
@@ -20,27 +21,39 @@ export interface ListPost {
 	created: number;
 	/** **已渲染的摘要 HTML**（发布流水线已按 Markdown 渲染并白名单清洗），原样输出 */
 	excerptHtml?: string;
-	/** 摘要是不是只是正文的一部分（手写节选或 `<!--more-->` 前半段）；全文当摘要时不显示「阅读剩余部分」 */
-	hasMore?: boolean;
 	categories?: TermLink[];
+	tags?: TermLink[];
 }
 
-export function renderPostItem(post: ListPost, site: SiteInfo): string {
-	const meta: string[] = [
-		`<time datetime="${escapeHtml(formatDateTime(post.created))}">${escapeHtml(formatDate(post.created, site.timezoneOffset))}</time>`,
-	];
-	if (post.categories && post.categories.length > 0) {
-		const links = post.categories
-			.map((term) => `<a href="${escapeHtml(term.url)}">${escapeHtml(term.name)}</a>`)
-			.join(', ');
-		meta.push(`<span class="post-categories">${links}</span>`);
-	}
+/**
+ * 列表项的「底栏」：日期在左下角（带日历图标），分类 + 标签在右下角（胶囊按钮）。
+ * 两者都做**可选**：没有分类/标签的文章只出日期那一侧，不留空壳容器。
+ *
+ * 按钮带图标：分类是文件夹、标签是标签形（theme/icons.ts），icon 用主题色、
+ * 文字保持灰 —— 与左侧「粉 icon + 灰日期」同一模式（见 style.css 的 .term-btn）。
+ */
+function renderTermBtn(term: TermLink, icon: string): string {
+	return `<a class="term-btn" href="${escapeHtml(term.url)}">${renderIcon(icon)}${escapeHtml(term.name)}</a>`;
+}
 
+function renderItemFoot(post: ListPost, site: SiteInfo): string {
+	const termButtons =
+		[...(post.categories ?? []).map((term) => renderTermBtn(term, 'categories')),
+			...(post.tags ?? []).map((term) => renderTermBtn(term, 'tags'))].join('');
+	return `
+			<div class="post-item-foot">
+				<span class="post-item-date">${renderIcon('calendar')}<time datetime="${escapeHtml(formatDateTime(post.created))}">${escapeHtml(formatDate(post.created, site.timezoneOffset))}</time></span>${termButtons ? `\n				<span class="post-item-terms">${termButtons}</span>` : ''}
+			</div>`;
+}
+
+/**
+ * 列表项整体可点：标题链接用 ::after 铺满整个卡片（CSS 的「stretched link」，
+ * 见 style.css），所以 <a> 里只有标题文字；分类/标签按钮要能单独点，
+ * 由 .post-item-terms 抬到铺满层之上。
+ */
+export function renderPostItem(post: ListPost, site: SiteInfo): string {
 	return `		<li class="post-item">
-			<h2 class="post-item-title"><a href="${escapeHtml(post.url)}">${escapeHtml(post.title)}</a></h2>
-			<p class="post-meta">
-				${meta.join('\n\t\t\t\t')}
-			</p>${post.excerptHtml ? `\n\t\t\t<div class="post-excerpt">${post.excerptHtml}</div>` : ''}${post.hasMore ? `\n\t\t\t<p class="post-more"><a href="${escapeHtml(post.url)}" title="${escapeHtml(post.title)}">阅读剩余部分</a></p>` : ''}
+			<h2 class="post-item-title"><a href="${escapeHtml(post.url)}">${escapeHtml(post.title)}</a></h2>${post.excerptHtml ? `\n\t\t\t<div class="post-excerpt">${post.excerptHtml}</div>` : ''}${renderItemFoot(post, site)}
 		</li>`;
 }
 
@@ -65,9 +78,9 @@ export function renderPagination(options: PaginationOptions): string {
 	if (totalPages <= 1) return '';
 
 	const parts: string[] = [];
-	if (prevUrl) parts.push(`<a class="page-prev" href="${escapeHtml(prevUrl)}">上一页</a>`);
+	if (prevUrl) parts.push(`<a class="page-prev" href="${escapeHtml(prevUrl)}">${renderIcon('arrow-left')}上一页</a>`);
 	parts.push(`<span class="page-status">第 ${page} / ${totalPages} 页</span>`);
-	if (nextUrl) parts.push(`<a class="page-next" href="${escapeHtml(nextUrl)}">下一页</a>`);
+	if (nextUrl) parts.push(`<a class="page-next" href="${escapeHtml(nextUrl)}">下一页${renderIcon('arrow-right')}</a>`);
 
 	return `	<nav class="pagination">
 		${parts.join('\n\t\t')}

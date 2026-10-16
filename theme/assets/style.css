@@ -571,6 +571,20 @@ hr {
 	font-size: 0.9375rem;
 }
 
+/* --- 评论（Twikoo，options.twikoo_env 配了才渲染） --- */
+.post-comments {
+	margin-top: 2.5rem;
+	padding-top: 1.5rem;
+	border-top: 1px solid var(--border);
+}
+
+/* 上一篇/下一篇存在时，它的 border-top 已经分隔过一次，评论区不再重复画线 */
+.post-nav + .post-comments {
+	border-top: none;
+	padding-top: 0;
+	margin-top: 0;
+}
+
 /* --- 目录 --- */
 
 /*

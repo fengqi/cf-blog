@@ -148,6 +148,17 @@ Cloudflare 的 URL Rewrite **不能改写 hostname**（只能改 path 和 query�
 > 前提：这个 hostname 要能取到同一个桶里的 `/usr/uploads/...`（R2 自定义域名或 CDN 回源），
 > **路径不能变**。存量正文（相对路径 / 旧绝对地址）不受影响。
 
+> ✅ **评论：`options.twikoo_env`（2026-10-16 新增，可空）**
+>
+> 配了它，文章页与独立页面（都走 `renderPost`）才渲染 Twikoo 评论区容器；
+> 留空则整站不出评论。前端脚本从 jsdelivr 加载，版本写死在
+> `theme/post.ts` 的 `TWIKOO_VERSION`，**必须与 Twikoo 服务端大版本一致**
+> （服务端 `GET_CONFIG` 会返回 VERSION）。评论线程标识（`path`）用 canonical
+> **相对路径**：旧 permalink 页（§5.1 方案 A）的评论并进新地址的同一条线程，
+> 也不随换域名漂移。评论数据全在 Twikoo 服务端 —— D1 没有 comments 表，
+> 前台依然纯静态直出。这个配置写进每篇文章页的 HTML，**改了要全站重渲**
+> （后台设置页已把 `twikoo_env` 纳入 frontChanged 判断）。
+
 **主域名（R2）：`blog.fengqi.me`**
 
 | 路径                                                    | 内容                           |
@@ -217,7 +228,7 @@ Cloudflare 的 URL Rewrite **不能改写 hostname**（只能改 path 和 query�
 
 `users` / `contents` / `metas` / `relationships` / `fields` / `options`。
 
-原 Typecho 的 `comments` 表整体移除——本方案不实现评论功能。
+原 Typecho 的 `comments` 表整体移除——D1 不存任何评论数据。评论由第三方 Twikoo 承接（见 §2 的 `options.twikoo_env`），数据全在 Twikoo 服务端。
 
 这套模型的价值：结构简单、被验证过、你熟悉、从 Typecho 迁移时字段一一对应。**不要重新发明。**
 
@@ -935,7 +946,7 @@ rclone copy ./usr/uploads r2:blog-content/usr/uploads
 | 标签、多标签 | ✅ | `relationships` |
 | 私密文章 | ⚠️ 降级为"不发布" | 静态直出后**无法做密码保护** —— 写进 R2 就是公开可读的。私密文章不生成 R2 对象，仅后台可读，等同于加密草稿 |
 | 定时发布 | ✅ | `status='waiting'` + Cron 扫描（每小时，见 §12.3） |
-| 评论（含嵌套 / 审核 / 反垃圾） | ❌ 整体移除 | 需求变更，前台不再有用户输入 |
+| 评论（含嵌套 / 审核 / 反垃圾） | ✅ 第三方承接 | 自建评论（D1 comments 表）整体移除后，改由 **Twikoo** 静态嵌入承接（2026-10-16）：文章页/独立页面渲染出评论区容器，数据全在 Twikoo 服务端 —— D1 仍无 comments 表，前台依然纯静态直出、无任何动态接口。配置见 §2 的 `options.twikoo_env` |
 | 固定链接 | ✅ **完全沿用现有 Typecho URL 结构** | 迁移生死线，见 §5.1 |
 | 归档（时间 / 分类 / 标签） | ✅ | **不含作者归档** —— ⚠️ 线上 `/author/1/`、`/author/1/2/` … `/author/1/12/` 是真实存在的 12 页 URL，本方案**明确放弃**，迁移后会 404（见 §5.1 的豁免清单） |
 | 分页 | ✅ | |

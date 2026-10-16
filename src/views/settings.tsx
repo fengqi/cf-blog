@@ -19,6 +19,8 @@ export interface SettingsValues {
 	/** 归一化后的小时数（+8 即东八区；库里可能存的是 Typecho 的秒数） */
 	timezoneOffset: number;
 	turnstileSiteKey: string;
+	/** Twikoo 评论服务的 envId（完整 URL）；与 options 里的 `twikoo_env` 对应，可空 */
+	twikooEnv: string;
 }
 
 export interface SettingsPageProps {
@@ -122,6 +124,22 @@ export function SettingsPage(props: SettingsPageProps) {
 					<p class="hint">
 						配了它登录页才渲染人机校验控件；配合密钥 <code>TURNSTILE_SECRET</code>（wrangler secret）
 						才真正强制校验。只影响登录页，不用重渲
+					</p>
+				</div>
+
+				<div>
+					<label for="twikoo_env">Twikoo 评论服务地址（可空）</label>
+					<input
+						type="text"
+						id="twikoo_env"
+						name="twikoo_env"
+						value={v.twikooEnv}
+						placeholder="https://comment.example.com/.netlify/functions/twikoo"
+					/>
+					<p class="hint">
+						评论系统 <a href="https://twikoo.js.org/">Twikoo</a> 服务端的完整地址（envId）。
+						<strong>配了它文章页和独立页面才渲染评论区</strong>，留空则不出评论。
+						前端脚本版本写死在主题里（theme/post.ts 的 TWIKOO_VERSION），要与服务端大版本一致
 					</p>
 				</div>
 

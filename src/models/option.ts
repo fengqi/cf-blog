@@ -35,6 +35,12 @@ export interface SiteOptions {
 	timezoneOffset: number;
 	/** theme_options 解析后的对象；解析失败为空对象 */
 	themeOptions: Record<string, unknown>;
+	/**
+	 * Twikoo 评论服务的 envId（完整 URL，如
+	 * `https://comment-blog.example/.netlify/functions/twikoo`）。可空 ——
+	 * 没配就不渲染评论区，文章页与独立页面都不出评论。
+	 */
+	twikooEnv: string;
 }
 
 export const OPTION_DEFAULTS = {
@@ -120,6 +126,7 @@ export async function getSiteOptionsVia(db: Db): Promise<SiteOptions> {
 		postsPerPage: parsePostsPerPage(values.get('posts_per_page')),
 		timezoneOffset: parseTimezoneOffset(values.get('timezone')),
 		themeOptions: parseThemeOptions(values.get('theme_options')),
+		twikooEnv: (values.get('twikoo_env') ?? '').trim(),
 	};
 
 	cache = { value, expiresAt: Date.now() + CACHE_TTL_MS };
@@ -138,6 +145,7 @@ export async function getSiteInfo(env: OptionsEnv): Promise<SiteInfo> {
 		description: options.description,
 		keywords: options.keywords,
 		timezoneOffset: options.timezoneOffset,
+		twikooEnv: options.twikooEnv || undefined,
 	};
 }
 
@@ -175,6 +183,8 @@ export const SITE_SETTING_KEYS = [
 	'posts_per_page',
 	'timezone',
 	'turnstile_site_key',
+	// 评论：写进每个文章页的 HTML（twikoo.init 的 envId），改了要全站重渲
+	'twikoo_env',
 ] as const;
 
 /**

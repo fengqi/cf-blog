@@ -187,10 +187,7 @@ adminRoutes.get('/admin/render', async (c) => {
 adminRoutes.get('/admin/settings', async (c) => {
 	const db = createDb(c.env.DB, 'admin');
 	// turnstile_site_key 不在 SiteOptions 里（那是主题要的东西），单独读
-	const [options, turnstileSiteKey] = await Promise.all([
-		getSiteOptions(c.env),
-		getOptionValue(db, 'turnstile_site_key'),
-	]);
+	const options = await getSiteOptions(c.env);
 
 	return c.html(
 		<SettingsPage
@@ -203,7 +200,8 @@ adminRoutes.get('/admin/settings', async (c) => {
 				staticUrl: options.staticUrl,
 				postsPerPage: options.postsPerPage,
 				timezoneOffset: options.timezoneOffset,
-				turnstileSiteKey: turnstileSiteKey ?? '',
+				turnstileSiteKey: (await getOptionValue(db, 'turnstile_site_key')) ?? '',
+				twikooEnv: options.twikooEnv,
 			}}
 			message={c.req.query('message')}
 			error={c.req.query('error')}
@@ -264,6 +262,7 @@ adminRoutes.post('/admin/settings', async (c) => {
 		posts_per_page: String(postsPerPage),
 		timezone: String(timezone),
 		turnstile_site_key: text('turnstile_site_key'),
+		twikoo_env: text('twikoo_env'),
 	});
 	const after = await getSiteOptions(c.env);
 
@@ -273,7 +272,9 @@ adminRoutes.post('/admin/settings', async (c) => {
 		before.keywords !== after.keywords ||
 		before.siteUrl !== after.siteUrl ||
 		before.postsPerPage !== after.postsPerPage ||
-		before.timezoneOffset !== after.timezoneOffset;
+		before.timezoneOffset !== after.timezoneOffset ||
+		// 评论 envId 写进每个文章页/独立页面的 HTML，变了同样要全站重渲
+		before.twikooEnv !== after.twikooEnv;
 
 	let message = '设置已保存';
 	if (frontChanged) {

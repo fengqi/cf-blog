@@ -11,6 +11,13 @@ import { renderIcon } from './icons';
 import { extractToc } from './toc';
 import type { TocItem } from './toc';
 
+/**
+ * Twikoo 前端脚本版本。**必须与服务端版本一致**（服务端就是用户部署的 Twikoo
+ * 实例，GET_CONFIG 会返回 VERSION）—— 大版本不匹配时接口会对不上。
+ * 升级时同步改这里与 `options.twikoo_env` 指向的服务端。
+ */
+const TWIKOO_VERSION = '2.0.15';
+
 /** 分类 / 标签链接 */
 export interface TermLink {
 	name: string;
@@ -83,6 +90,36 @@ function renderTocItems(items: TocItem[]): string {
 		.join('\n');
 }
 
+/**
+ * 把值变成能放进 `<script>` 里单引号字符串的字面量。
+ * script 内容对 HTML 解析器是 **raw text**，escapeHtml() 在这里只会帮倒忙
+ * （`&` 会变成字面的 `&amp;`）；要防的是引号逃逸与 `</script` 提前闭合。
+ */
+function jsString(value: string): string {
+	return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/<\/script/gi, '<\\/script');
+}
+
+/**
+ * Twikoo 评论区。`options.twikoo_env` 没配就整个不渲染（列表/归档页本来就不经过这里）。
+ *
+ * `path` 传 canonical **相对路径**而不是 `location.pathname`：
+ * 旧 permalink 页（§5.1 方案 A，canonical 指向新地址）的评论要并进新地址的同一条线程；
+ * 相对路径也不随换域名漂移。 Twikoo 自己按 path 存取评论，域名变了线程还在。
+ */
+function renderComments(site: SiteInfo, canonicalPath: string): { container: string; foot: string } {
+	if (!site.twikooEnv) return { container: '', foot: '' };
+	const container = `\n\t<div class="post-comments" id="twikoo"></div>`;
+	const foot = `<script src="https://cdn.jsdelivr.net/npm/twikoo@${TWIKOO_VERSION}/dist/twikoo.all.min.js"></script>
+<script>
+twikoo.init({
+	envId: '${jsString(site.twikooEnv)}',
+	el: '#twikoo',
+	path: '${jsString(canonicalPath)}'
+});
+</script>`;
+	return { container, foot };
+}
+
 export function renderPost(context: PostContext): string {
 	const { site, post, prev, next } = context;
 
@@ -153,13 +190,15 @@ ${contentHtml}
 		</div>
 	</article>${navHtml.length ? `\n\t<nav class="post-nav">\n\t\t${navHtml.join('\n\t\t')}\n\t</nav>` : ''}`;
 
+	const comments = renderComments(site, context.canonicalPath || post.url);
+
 	/**
 	 * `.post-body` **两种版式都要有**：正文列宽由它的网格轨道决定
 	 * （见 style.css 的 `.post-layout`）。少了这层包裹，正文会直接铺满整个容器、
 	 * 跟另一种版式错开。
 	 */
 	const body = `		<div class="post-body">
-${article}
+${article}${comments.container}
 		</div>`;
 
 	// 没有目录（标题少于两条）的文章不渲染目录栏 —— 版式和有目录的文章完全一样
@@ -184,6 +223,8 @@ ${body}
 		title: post.title,
 		canonicalPath: context.canonicalPath || post.url,
 		nav: context.nav,
+		/** Twikoo 的 CDN 脚本与 init 必须等容器进了 DOM，放 </body> 前最稳 */
+		extraFoot: comments.foot || undefined,
 		/**
 		 * **全站一个宽度档**（`style.css` 的 `--container-size`，当前 56rem）。
 		 *

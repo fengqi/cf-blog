@@ -32,6 +32,11 @@ export interface SiteInfo {
 	lang?: string;
 	/** 时区偏移小时数，默认 +8（options 里没有就按 +8） */
 	timezoneOffset?: number;
+	/**
+	 * Twikoo 评论服务的 envId（完整 URL）。可空 —— 没配就不渲染评论区
+	 * （只有文章页/独立页面用它，见 post.ts）。
+	 */
+	twikooEnv?: string;
 }
 
 export interface NavLink {

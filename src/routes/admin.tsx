@@ -8,7 +8,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { createDb } from '../lib/db';
-import { hashPassword, PBKDF2_ITERATIONS, verifyPassword } from '../lib/auth';
+import { buildLogoutCookie, hashPassword, PBKDF2_ITERATIONS, verifyPassword } from '../lib/auth';
 import { categoryKey, pageCount, postKey } from '../lib/url';
 import { parseDateTimeLocal } from '../lib/time';
 import {
@@ -467,6 +467,8 @@ adminRoutes.get('/admin/password', async (c) => {
 /**
  * 改口令（§8.2）：校验当前口令 → PBKDF2 哈希落库 → `token_version += 1`。
  * 保存成功后当前会话也失效了（中间件比 tv），跳登录页让用户用新口令进来。
+ * **必须同时清掉旧 Cookie**：登录页只认签名不认 tv（见 auth.tsx），残留的
+ * 旧会话 Cookie 会让登录页把你弹回 /admin，再被 requireAuth 踢回来 —— 死循环。
  */
 adminRoutes.post('/admin/password', async (c) => {
 	const db = createDb(c.env.DB, 'admin');
@@ -488,6 +490,7 @@ adminRoutes.post('/admin/password', async (c) => {
 	}
 
 	await updatePassword(db, user.uid, await hashPassword(next, PBKDF2_ITERATIONS));
+	c.header('Set-Cookie', buildLogoutCookie());
 	return c.redirect(
 		'/admin/login?message=' + encodeURIComponent('口令已修改，请用新口令重新登录'),
 		303,

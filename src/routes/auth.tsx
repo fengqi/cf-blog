@@ -26,7 +26,7 @@ import {
 import { createDb } from '../lib/db';
 import { getOptionValue } from '../models/option';
 import { getSiteOptions } from '../models/option';
-import { countUsableAdmins, getUserByUsername, touchLogin } from '../models/user';
+import { countUsableAdmins, getUserById, getUserByUsername, touchLogin } from '../models/user';
 import { LoginPage } from '../views/login';
 import type { AdminEnv } from '../types';
 
@@ -63,14 +63,20 @@ async function verifyTurnstile(secret: string, token: string, ip: string): Promi
 authRoutes.get('/admin/login', async (c) => {
 	c.header('Cache-Control', 'private, no-store');
 
-	// 已登录就别再看登录页
+	const db = createDb(c.env.DB, 'login');
+
+	// 已登录就别再看登录页。
+	// **必须比对 token_version**：只验签名的话，改密/重置后残留的旧 Cookie
+	// 会被当成有效会话弹回 /admin，再被 requireAuth 踢回来 —— 重定向死循环。
 	const token = readSessionCookie(c.req.header('cookie') ?? null);
 	if (token && c.env.SESSION_SECRET) {
 		const payload = await verifySession(token, c.env.SESSION_SECRET);
-		if (payload) return c.redirect('/admin', 302);
+		if (payload) {
+			const user = await getUserById(db, payload.uid);
+			if (user && user.token_version === payload.tv) return c.redirect('/admin', 302);
+		}
 	}
 
-	const db = createDb(c.env.DB, 'login');
 	const options = await getSiteOptions(c.env);
 	const [siteKey, usableAdmins] = await Promise.all([
 		getOptionValue(db, 'turnstile_site_key'),

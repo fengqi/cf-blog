@@ -79,6 +79,9 @@ export async function loadSnapshot(env: SnapshotEnv, label = 'snapshot'): Promis
 				description: options.description,
 				keywords: options.keywords,
 				timezoneOffset: options.timezoneOffset,
+				// SiteInfo 是这里内联拼的（不走 getSiteInfo()）；可选字段漏了
+				// typecheck 抓不住 —— 评论区整个静默消失，只能靠端到端验证兜底
+				twikooEnv: options.twikooEnv || undefined,
 			},
 			postsPerPage: options.postsPerPage,
 			posts,
